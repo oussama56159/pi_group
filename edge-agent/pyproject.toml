@@ -1,0 +1,32 @@
+[project]
+name = "aerocommand-edge-agent"
+version = "0.1.0"
+description = "AeroCommand Raspberry Pi edge agent (MAVLink ↔ MQTT bridge)."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+dependencies = [
+  "aerocommand-shared>=0.1.0",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "aiomqtt>=2.0",
+  "orjson>=3.9",
+  "pymavlink>=2.4",
+]
+
+[project.scripts]
+aerocommand-edge-agent = "aerocommand_edge_agent.main:main"
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120

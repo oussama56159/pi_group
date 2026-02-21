@@ -1,0 +1,30 @@
+apiVersion: v2
+name: aerocommand
+description: AeroCommand – Cloud Drone & Robot Fleet Management Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+maintainers:
+  - name: AeroCommand Team
+    email: ops@aerocommand.io
+keywords:
+  - drone
+  - robotics
+  - fleet-management
+  - iot
+  - mavlink
+  - pixhawk
+dependencies:
+  - name: postgresql
+    version: "15.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: postgresql.enabled
+  - name: mongodb
+    version: "15.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: mongodb.enabled
+  - name: redis
+    version: "19.x.x"
+    repository: https://charts.bitnami.com/bitnami
+    condition: redis.enabled
+

@@ -1,0 +1,158 @@
+# ============================================================================
+# AeroCommand – Local Development Stack
+# Usage: docker compose up -d
+# ============================================================================
+name: aerocommand-dev
+
+services:
+  # ── Databases ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: aero-postgres
+    environment:
+      POSTGRES_USER: aerocommand
+      POSTGRES_PASSWORD: aerocommand_secret
+      POSTGRES_DB: aerocommand
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aerocommand"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongo:
+    image: mongo:7
+    container_name: aero-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: aerocommand
+      MONGO_INITDB_ROOT_PASSWORD: aerocommand_secret
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--username", "aerocommand", "--password", "aerocommand_secret", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aero-redis
+    command: redis-server --requirepass aerocommand_redis_secret --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "aerocommand_redis_secret", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MQTT Broker ──
+  emqx:
+    image: emqx/emqx:5.5
+    container_name: aero-emqx
+    environment:
+      EMQX_NAME: aerocommand
+      EMQX_HOST: 127.0.0.1
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: aerocommand_emqx_admin
+    ports:
+      - "${EMQX_MQTT_HOST_PORT:-1883}:1883"     # MQTT TCP
+      - "${EMQX_WS_HOST_PORT:-8083}:8083"       # MQTT WebSocket
+      - "${EMQX_DASHBOARD_HOST_PORT:-18083}:18083" # EMQX Dashboard
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - ./infra/emqx/emqx.dev.conf:/opt/emqx/etc/emqx.conf:ro
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend API Gateway (monolith-mode) ──
+  api-server:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: aero-api
+    environment:
+      ENVIRONMENT: development
+      DEBUG: "true"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: aerocommand
+      POSTGRES_PASSWORD: aerocommand_secret
+      POSTGRES_DB: aerocommand
+      MONGO_HOST: mongo
+      MONGO_PORT: "27017"
+      MONGO_USER: aerocommand
+      MONGO_PASSWORD: aerocommand_secret
+      MONGO_DB: aerocommand_telemetry
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: aerocommand_redis_secret
+      MQTT_BROKER_HOST: emqx
+      MQTT_BROKER_PORT: "1883"
+      JWT_SECRET_KEY: dev_jwt_secret_change_in_production
+      AUTO_CREATE_DB: "true"
+      SEED_OWNER_ENABLED: "true"
+      OWNER_EMAIL: owner@makerskills.com
+      OWNER_PASSWORD: makerskills_owner_change_me
+      OWNER_NAME: MakerSkills Owner
+      OWNER_CREATE_ORG: "false"
+      OWNER_ORG_NAME: AeroCommand HQ
+      OWNER_ORG_SLUG: aerocommand
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      emqx:
+        condition: service_healthy
+    command: >
+      uvicorn backend.services.gateway.main:app
+      --host 0.0.0.0 --port 8000 --reload
+      --log-level debug
+
+  # ── Dashboard (dev mode with hot reload) ──
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      target: builder
+    container_name: aero-dashboard
+    working_dir: /app
+    command: npx vite --host 0.0.0.0 --port 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./dashboard/src:/app/src
+      - ./dashboard/public:/app/public
+    environment:
+      VITE_PROXY_TARGET: http://api-server:8000
+      VITE_PROXY_WS_TARGET: ws://api-server:8000
+
+volumes:
+  pg_data:
+  mongo_data:
+  redis_data:
+  emqx_data:
+
+networks:
+  default:
+    name: aerocommand-network
+

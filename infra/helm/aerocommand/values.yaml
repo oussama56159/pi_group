@@ -1,0 +1,128 @@
+# ============================================================================
+# AeroCommand Helm Values
+# ============================================================================
+
+global:
+  environment: production
+  imageRegistry: ghcr.io/aerocommand
+  imagePullSecrets: []
+
+# ── API Server ──
+apiServer:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/aerocommand/api-server
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8000
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilization: 70
+  corsOrigins: '["https://app.aerocommand.io"]'
+  env:
+    ENVIRONMENT: production
+    DEBUG: "false"
+    LOG_LEVEL: WARNING
+
+secrets:
+  create: true
+  POSTGRES_USER: aerocommand
+  POSTGRES_PASSWORD: CHANGE_ME_IN_PRODUCTION
+  MONGO_USER: aerocommand
+  MONGO_PASSWORD: CHANGE_ME_IN_PRODUCTION
+  REDIS_PASSWORD: CHANGE_ME_IN_PRODUCTION
+  JWT_SECRET_KEY: CHANGE_ME_IN_PRODUCTION
+  MQTT_USERNAME: aerocommand
+  MQTT_PASSWORD: CHANGE_ME_IN_PRODUCTION
+
+# ── Dashboard ──
+dashboard:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/aerocommand/dashboard
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ── EMQX ──
+emqx:
+  replicaCount: 1
+  image:
+    repository: emqx/emqx
+    tag: "5.5"
+  service:
+    type: ClusterIP
+    ports:
+      mqtt: 1883
+      mqttWs: 8083
+      mqttSsl: 8883
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+
+# ── Ingress ──
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/enable-websocket: "true"
+  hosts:
+    dashboard: app.aerocommand.io
+    api: api.aerocommand.io
+  tls:
+    secretName: aerocommand-tls
+
+# ── Bitnami Sub-charts ──
+postgresql:
+  enabled: true
+  auth:
+    username: aerocommand
+    database: aerocommand
+    existingSecret: aerocommand-secrets
+  primary:
+    persistence:
+      size: 20Gi
+
+mongodb:
+  enabled: true
+  auth:
+    rootUser: aerocommand
+    existingSecret: aerocommand-secrets
+  persistence:
+    size: 50Gi
+
+redis:
+  enabled: true
+  auth:
+    existingSecret: aerocommand-secrets
+    existingSecretPasswordKey: REDIS_PASSWORD
+  master:
+    persistence:
+      size: 2Gi
+

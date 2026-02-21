@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aerocommand-config
+  labels:
+    {{- include "aerocommand.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: {{ .Values.global.environment | quote }}
+  DEBUG: {{ .Values.apiServer.env.DEBUG | quote }}
+  LOG_LEVEL: {{ .Values.apiServer.env.LOG_LEVEL | quote }}
+
+  # Databases (Bitnami dependency defaults)
+  POSTGRES_HOST: {{ printf "%s-postgresql" .Release.Name | quote }}
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: {{ .Values.postgresql.auth.database | quote }}
+
+  MONGO_HOST: {{ printf "%s-mongodb" .Release.Name | quote }}
+  MONGO_PORT: "27017"
+  MONGO_DB: {{ default "aerocommand_telemetry" .Values.global.mongoDb | quote }}
+
+  REDIS_HOST: {{ printf "%s-redis-master" .Release.Name | quote }}
+  REDIS_PORT: "6379"
+
+  # MQTT
+  MQTT_BROKER_HOST: {{ include "aerocommand.fullname" . }}-emqx
+  MQTT_BROKER_PORT: {{ .Values.emqx.service.ports.mqtt | quote }}
+  MQTT_BROKER_WS_PORT: {{ .Values.emqx.service.ports.mqttWs | quote }}
+
+  CORS_ORIGINS: {{ .Values.apiServer.corsOrigins | quote }}

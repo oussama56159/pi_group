@@ -1,0 +1,38 @@
+[project]
+name = "aerocommand-shared"
+version = "0.1.0"
+description = "AeroCommand shared Python library (schemas, topics, config, MAVLink definitions)."
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [{ name = "AeroCommand Team" }]
+
+# Keep dependencies minimal; heavy deps are optional and only needed when using DB/MQTT helpers.
+dependencies = [
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+]
+
+[project.optional-dependencies]
+backend = [
+  "sqlalchemy>=2.0",
+  "asyncpg>=0.29",
+  "motor>=3.3",
+  "redis[hiredis]>=5.0",
+  "aiomqtt>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+

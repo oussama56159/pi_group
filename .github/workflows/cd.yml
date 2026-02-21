@@ -1,0 +1,125 @@
+name: CD – Deploy
+
+on:
+  workflow_run:
+    workflows: ["CI – Build & Test"]
+    types: [completed]
+    branches: [main, develop]
+
+env:
+  KUBE_NAMESPACE: aerocommand
+  REGISTRY: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  # ── Deploy to Staging (develop branch) ──
+  deploy-staging:
+    name: Deploy → Staging
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'develop'
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+
+      - name: Update image tags
+        run: |
+          SHA=${{ github.event.workflow_run.head_sha }}
+          kubectl set image deployment/api-server \
+            api-server=${{ env.REGISTRY }}/api-server:${SHA} \
+            -n ${KUBE_NAMESPACE}-staging
+          kubectl set image deployment/dashboard \
+            dashboard=${{ env.REGISTRY }}/dashboard:${SHA} \
+            -n ${KUBE_NAMESPACE}-staging
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/api-server -n ${KUBE_NAMESPACE}-staging --timeout=300s
+          kubectl rollout status deployment/dashboard -n ${KUBE_NAMESPACE}-staging --timeout=300s
+
+      - name: Smoke test
+        run: |
+          STAGING_URL=${{ vars.STAGING_API_URL }}
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${STAGING_URL}/health/ready)
+            if [ "$STATUS" = "200" ]; then echo "Health check passed"; exit 0; fi
+            sleep 10
+          done
+          echo "Health check failed"; exit 1
+
+  # ── Deploy to Production (main branch) ──
+  deploy-production:
+    name: Deploy → Production
+    runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubeconfig
+        run: echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > $HOME/.kube/config
+
+      - name: Deploy with Helm
+        run: |
+          SHA=${{ github.event.workflow_run.head_sha }}
+          helm upgrade --install aerocommand ./infra/helm/aerocommand \
+            --namespace ${KUBE_NAMESPACE} \
+            --set apiServer.image.tag=${SHA} \
+            --set dashboard.image.tag=${SHA} \
+            --set global.environment=production \
+            --values ./infra/helm/aerocommand/values.yaml \
+            --wait --timeout=600s
+
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/api-server -n ${KUBE_NAMESPACE} --timeout=300s
+          kubectl rollout status deployment/dashboard -n ${KUBE_NAMESPACE} --timeout=300s
+
+      - name: Production smoke test
+        run: |
+          PROD_URL=${{ vars.PROD_API_URL }}
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${PROD_URL}/health/ready)
+            if [ "$STATUS" = "200" ]; then echo "Production healthy"; exit 0; fi
+            sleep 10
+          done
+          echo "Production health check failed"; exit 1
+
+  # ── Run Database Migrations ──
+  migrate:
+    name: Run Migrations
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Alembic
+        run: pip install alembic asyncpg sqlalchemy pydantic pydantic-settings
+
+      - name: Run migrations
+        env:
+          POSTGRES_HOST: ${{ secrets.PROD_POSTGRES_HOST }}
+          POSTGRES_USER: ${{ secrets.PROD_POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.PROD_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.PROD_POSTGRES_DB }}
+        run: |
+          cd backend
+          alembic upgrade head
+

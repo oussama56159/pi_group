@@ -1,0 +1,76 @@
+# ── EMQX MQTT Broker StatefulSet ──
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: emqx
+  namespace: aerocommand
+spec:
+  serviceName: emqx-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: emqx
+  template:
+    metadata:
+      labels:
+        app: emqx
+    spec:
+      containers:
+        - name: emqx
+          image: emqx/emqx:5.5
+          ports:
+            - name: mqtt-tcp
+              containerPort: 1883
+            - name: mqtt-ws
+              containerPort: 8083
+            - name: mqtt-ssl
+              containerPort: 8883
+            - name: dashboard
+              containerPort: 18083
+          env:
+            - name: EMQX_NAME
+              value: aerocommand
+            - name: EMQX_HOST
+              value: "127.0.0.1"
+          volumeMounts:
+            - name: emqx-data
+              mountPath: /opt/emqx/data
+            - name: emqx-config
+              mountPath: /opt/emqx/etc/emqx.conf
+              subPath: emqx.conf
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits:   { cpu: "2", memory: 1Gi }
+          readinessProbe:
+            exec:
+              command: ["emqx", "ping"]
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: emqx-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: emqx-svc
+  namespace: aerocommand
+spec:
+  selector:
+    app: emqx
+  ports:
+    - name: mqtt-tcp
+      port: 1883
+      targetPort: 1883
+    - name: mqtt-ws
+      port: 8083
+      targetPort: 8083
+    - name: mqtt-ssl
+      port: 8883
+      targetPort: 8883
+  clusterIP: None
+

@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import asyncio
+import math
+
+from .config import get_settings
+from .mavlink_reader import MavlinkReader
+from .mqtt_bridge import MqttBridge
+from .telemetry_state import TelemetryState
+
+
+def _deg(rad: float) -> float:
+    return rad * 180.0 / math.pi
+
+
+async def _mavlink_loop(reader: MavlinkReader, state: TelemetryState) -> None:
+    # This runs in a thread-like manner via asyncio.to_thread to avoid blocking.
+    while True:
+        msg = await asyncio.to_thread(reader.recv, 1.0)
+        if msg is None:
+            continue
+
+        if msg.name == "HEARTBEAT":
+            base_mode = int(msg.data.get("base_mode", 0))
+            armed = bool(base_mode & 0b10000000)  # MAV_MODE_FLAG_SAFETY_ARMED
+            state.system.armed = armed
+            state.system.system_status = int(msg.data.get("system_status", 0))
+            state.system.vehicle_type = int(msg.data.get("type", 0))
+            state.system.autopilot = str(msg.data.get("autopilot", "unknown"))
+
+        elif msg.name == "ATTITUDE":
+            state.attitude.roll = _deg(float(msg.data.get("roll", 0.0)))
+            state.attitude.pitch = _deg(float(msg.data.get("pitch", 0.0)))
+            state.attitude.yaw = _deg(float(msg.data.get("yaw", 0.0)))
+            state.attitude.rollspeed = float(msg.data.get("rollspeed", 0.0))
+            state.attitude.pitchspeed = float(msg.data.get("pitchspeed", 0.0))
+            state.attitude.yawspeed = float(msg.data.get("yawspeed", 0.0))
+            state.heading = state.attitude.yaw % 360
+
+        elif msg.name in ("GPS_RAW_INT", "GLOBAL_POSITION_INT"):
+            # GPS_RAW_INT lat/lon are 1e7 scaled; GLOBAL_POSITION_INT is also 1e7
+            if "lat" in msg.data and "lon" in msg.data:
+                state.gps.lat = float(msg.data.get("lat", 0)) / 1e7
+                state.gps.lng = float(msg.data.get("lon", 0)) / 1e7
+
+            if "alt" in msg.data:
+                # GPS_RAW_INT alt is mm; GLOBAL_POSITION_INT alt is mm
+                state.gps.alt = float(msg.data.get("alt", 0)) / 1000.0
+
+            if "relative_alt" in msg.data:
+                state.gps.relative_alt = float(msg.data.get("relative_alt", 0)) / 1000.0
+
+            if "fix_type" in msg.data:
+                state.gps.fix_type = int(msg.data.get("fix_type", 0))
+
+            if "satellites_visible" in msg.data:
+                state.gps.satellites_visible = int(msg.data.get("satellites_visible", 0))
+
+            if "vel" in msg.data:
+                # GPS_RAW_INT vel is cm/s
+                state.groundspeed = float(msg.data.get("vel", 0)) / 100.0
+
+        elif msg.name in ("SYS_STATUS", "BATTERY_STATUS"):
+            # SYS_STATUS voltage_battery is mV, current_battery is cA
+            if "voltage_battery" in msg.data:
+                state.battery.voltage = float(msg.data.get("voltage_battery", 0)) / 1000.0
+            if "current_battery" in msg.data:
+                state.battery.current = float(msg.data.get("current_battery", 0)) / 100.0
+            if "battery_remaining" in msg.data:
+                state.battery.remaining = float(msg.data.get("battery_remaining", 0))
+
+
+async def _run() -> None:
+    settings = get_settings()
+
+    reader = MavlinkReader(settings.MAVLINK_CONNECTION, settings.MAVLINK_BAUD, settings.MAVLINK_SOURCE_SYSTEM)
+    reader.connect()
+
+    telemetry_state = TelemetryState(vehicle_id=settings.VEHICLE_ID)
+
+    bridge = MqttBridge(
+        org_id=settings.ORG_ID,
+        vehicle_id=settings.VEHICLE_ID,
+        host=settings.MQTT_HOST,
+        port=settings.MQTT_PORT,
+        username=settings.MQTT_USERNAME,
+        password=settings.MQTT_PASSWORD,
+        client_id=settings.MQTT_CLIENT_ID,
+        keepalive=settings.MQTT_KEEPALIVE,
+        qos=settings.MQTT_QOS,
+    )
+
+    telemetry_interval_s = 1.0 / settings.TELEMETRY_HZ
+    heartbeat_interval_s = 1.0 / settings.HEARTBEAT_HZ
+
+    await asyncio.gather(
+        _mavlink_loop(reader, telemetry_state),
+        bridge.run(
+            telemetry_state=telemetry_state,
+            telemetry_interval_s=telemetry_interval_s,
+            heartbeat_interval_s=heartbeat_interval_s,
+        ),
+    )
+
+
+def main() -> None:
+    asyncio.run(_run())
