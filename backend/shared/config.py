@@ -5,8 +5,9 @@ Each microservice imports and extends this base config.
 from __future__ import annotations
 
 from functools import lru_cache
+import json
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -86,7 +87,30 @@ class BaseServiceSettings(BaseSettings):
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # ── CORS ──
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://localhost:3001"]
+    CORS_ORIGINS: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://localhost:3001"]
+    )
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _parse_cors_origins(cls, value):
+        # Allow env var formats:
+        # - JSON: ["https://app.vercel.app", "http://localhost:3000"]
+        # - CSV:  https://app.vercel.app,http://localhost:3000
+        if value is None:
+            return value
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    return [str(x) for x in parsed]
+                except Exception:
+                    pass
+            return [part.strip() for part in raw.split(",") if part.strip()]
+        return value
 
     model_config = {
         "env_file": ".env",
