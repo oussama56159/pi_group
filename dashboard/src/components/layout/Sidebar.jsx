@@ -9,19 +9,19 @@ import { useAuthStore } from '@/stores/authStore';
 import { ROLES } from '@/config/constants';
 
 const navItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard', roles: null },
-  { path: '/fleet', icon: Radar, label: 'Fleet Management', roles: null },
-  { path: '/telemetry', icon: Radio, label: 'Telemetry', roles: null },
-  { path: '/map', icon: Map, label: 'Live Map', roles: null },
-  { path: '/missions', icon: Navigation, label: 'Mission Planner', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.PILOT, ROLES.OPERATOR] },
-  { path: '/control', icon: Gamepad2, label: 'Control Panel', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.PILOT] },
+  { path: '/app', icon: LayoutDashboard, label: 'Dashboard', roles: null },
+  { path: '/app/fleet', icon: Radar, label: 'Fleet Management', roles: null },
+  { path: '/app/telemetry', icon: Radio, label: 'Telemetry', roles: null },
+  { path: '/app/map', icon: Map, label: 'Live Map', roles: null },
+  { path: '/app/missions', icon: Navigation, label: 'Mission Planner', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.PILOT, ROLES.OPERATOR] },
+  { path: '/app/control', icon: Gamepad2, label: 'Control Panel', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN, ROLES.PILOT] },
   { type: 'divider' },
-  { path: '/alerts', icon: Bell, label: 'Alerts', roles: null },
-  { path: '/analytics', icon: BarChart3, label: 'Analytics', roles: null },
+  { path: '/app/alerts', icon: Bell, label: 'Alerts', roles: null },
+  { path: '/app/analytics', icon: BarChart3, label: 'Analytics', roles: null },
   { type: 'divider' },
-  { path: '/users', icon: Users, label: 'User Management', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN] },
-  { path: '/admin', icon: Shield, label: 'Admin Panel', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN] },
-  { path: '/settings', icon: Settings, label: 'Settings', roles: null },
+  { path: '/app/users', icon: Users, label: 'User Management', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN] },
+  { path: '/app/admin', icon: Shield, label: 'Admin Panel', roles: [ROLES.SUPER_ADMIN, ROLES.ADMIN] },
+  { path: '/app/settings', icon: Settings, label: 'Settings', roles: null },
 ];
 
 export default function Sidebar() {
@@ -62,7 +62,7 @@ export default function Sidebar() {
           {filteredItems.map((item, i) => {
             if (item.type === 'divider') return <div key={i} className="my-3 border-t border-slate-800" />;
             const Icon = item.icon;
-            const isActive = location.pathname === item.path || (item.path !== '/' && location.pathname.startsWith(item.path));
+            const isActive = location.pathname === item.path || (item.path !== '/app' && location.pathname.startsWith(item.path));
             return (
               <NavLink
                 key={item.path}

@@ -4,8 +4,11 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../../api/api_client.dart';
+import '../../auth/auth_controller.dart';
+import '../../config/endpoint_controller.dart';
 import '../../models/vehicle_model.dart';
 import '../../realtime/realtime_controller.dart';
+import '../../realtime/telemetry_summary.dart';
 import '../screens/drone_details_screen.dart';
 import '../screens/fleet_map_fullscreen_screen.dart';
 import '../widgets/drone_logo.dart';
@@ -58,6 +61,9 @@ class _FleetTabState extends State<FleetTab> {
   @override
   Widget build(BuildContext context) {
     final realtime = context.watch<RealtimeController>();
+    final scheme = Theme.of(context).colorScheme;
+    final auth = context.watch<AuthController>();
+    final endpoints = context.watch<EndpointController>();
 
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -70,7 +76,7 @@ class _FleetTabState extends State<FleetTab> {
           if (_error != null)
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              child: Text(_error!, style: TextStyle(color: scheme.error)),
             ),
 
           Padding(
@@ -86,24 +92,30 @@ class _FleetTabState extends State<FleetTab> {
           ),
 
           if (_vehicles.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('No vehicles found.'),
-            ),
-          for (final v in _vehicles)
-            ListTile(
-              leading: DroneLogo(size: 26, color: Theme.of(context).colorScheme.onSurface),
-              title: Text(v.name),
-              subtitle: Text('${v.callsign} • ${v.status}'),
-              trailing: _VehicleTelemetryChip(vehicleId: v.id),
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => DroneDetailsScreen(vehicleId: v.id, initialName: v.name),
-                  ),
-                );
-              },
-            ),
+            _FleetEmptyState(
+              onRefresh: _load,
+              backendDisplay: endpoints.display,
+              role: auth.role,
+              isDemo: auth.isDemo,
+            )
+          else ...[
+            const SizedBox(height: 10),
+            for (final v in _vehicles)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: _VehicleAtAGlanceCard(
+                  vehicle: v,
+                  telemetry: realtime.latestTelemetry[v.id],
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => DroneDetailsScreen(vehicleId: v.id, initialName: v.name),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
           const SizedBox(height: 16),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -315,29 +327,224 @@ class _VehicleMarker {
   final LatLng point;
 }
 
-class _VehicleTelemetryChip extends StatelessWidget {
-  const _VehicleTelemetryChip({required this.vehicleId});
+class _FleetEmptyState extends StatelessWidget {
+  const _FleetEmptyState({
+    required this.onRefresh,
+    required this.backendDisplay,
+    required this.role,
+    required this.isDemo,
+  });
 
-  final String vehicleId;
+  final VoidCallback onRefresh;
+  final String backendDisplay;
+  final String role;
+  final bool isDemo;
 
   @override
   Widget build(BuildContext context) {
-    final realtime = context.watch<RealtimeController>();
-    final t = realtime.latestTelemetry[vehicleId];
-    if (t == null) {
-      return const Text('—');
-    }
-    final bat = t.batteryRemaining.toStringAsFixed(0);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Text('$bat%'),
-        Text(
-          t.mode,
-          style: Theme.of(context).textTheme.labelSmall,
-        ),
-      ],
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.air, size: 44, color: scheme.onSurfaceVariant),
+          const SizedBox(height: 10),
+          Text('No vehicles found', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            isDemo
+                ? 'Demo mode is on, but no demo vehicles are loaded.'
+                : 'This can happen if you are pointing at a different backend than the web app, or if your account is not assigned to any fleet (non-admin users only see vehicles in their fleets).',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'Backend: $backendDisplay\nRole: $role',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh'),
+          ),
+        ],
+      ),
     );
   }
+}
+
+class _VehicleAtAGlanceCard extends StatelessWidget {
+  const _VehicleAtAGlanceCard({
+    required this.vehicle,
+    required this.telemetry,
+    required this.onTap,
+  });
+
+  final VehicleModel vehicle;
+  final TelemetrySummary? telemetry;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    final age = telemetry == null ? null : DateTime.now().difference(telemetry!.timestamp);
+    final isFresh = age != null && age < const Duration(seconds: 15);
+    final dotColor = isFresh ? scheme.tertiary : scheme.outline;
+
+    final batteryPct = telemetry == null ? null : _formatBatteryPct(telemetry!);
+    final lastSeen = telemetry == null ? 'No telemetry yet' : '${_formatAge(age!)} ago';
+    final statusLabel = vehicle.status.trim().isEmpty ? 'unknown' : vehicle.status;
+    final showArmed = telemetry?.armed == true;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Stack(
+                children: [
+                  DroneLogo(size: 34, color: scheme.onSurface),
+                  Positioned(
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: scheme.surface, width: 2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            vehicle.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      vehicle.callsign,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _StatusPill(label: statusLabel, kind: _StatusPillKind.status),
+                        if (showArmed) _StatusPill(label: 'armed', kind: _StatusPillKind.armed),
+                        Text(
+                          lastSeen,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    batteryPct == null ? '—' : '$batteryPct%',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    telemetry?.mode ?? '—',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum _StatusPillKind { status, armed }
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.kind});
+
+  final String label;
+  final _StatusPillKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final normalized = label.toLowerCase();
+
+    Color background;
+    Color foreground;
+    if (kind == _StatusPillKind.armed) {
+      background = scheme.errorContainer;
+      foreground = scheme.onErrorContainer;
+    } else if (normalized.contains('online') || normalized.contains('in_flight')) {
+      background = scheme.tertiaryContainer;
+      foreground = scheme.onTertiaryContainer;
+    } else if (normalized.contains('offline')) {
+      background = scheme.surfaceContainerHighest;
+      foreground = scheme.onSurface;
+    } else {
+      background = scheme.surfaceContainerHighest;
+      foreground = scheme.onSurface;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(color: foreground),
+      ),
+    );
+  }
+}
+
+int _formatBatteryPct(TelemetrySummary t) {
+  // Backend frames may report 0..1 or 0..100; normalize to 0..100.
+  final raw = t.batteryRemaining;
+  final pct = raw <= 1.0 ? (raw * 100.0) : raw;
+  final clamped = pct.clamp(0.0, 100.0);
+  return clamped.round();
+}
+
+String _formatAge(Duration d) {
+  if (d.inSeconds < 60) return '${d.inSeconds}s';
+  if (d.inMinutes < 60) return '${d.inMinutes}m';
+  return '${d.inHours}h';
 }

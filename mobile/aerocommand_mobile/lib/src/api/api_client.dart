@@ -14,15 +14,20 @@ abstract class ApiClient {
 }
 
 class HttpApiClient implements ApiClient {
-  HttpApiClient({required TokenProvider tokenProvider, http.Client? client})
-      : _tokenProvider = tokenProvider,
+  HttpApiClient({
+    required TokenProvider tokenProvider,
+    String Function()? baseUrlProvider,
+    http.Client? client,
+  })  : _tokenProvider = tokenProvider,
+        _baseUrlProvider = baseUrlProvider ?? (() => AppConfig.apiBaseUrl),
         _client = client ?? http.Client();
 
   final TokenProvider _tokenProvider;
+  final String Function() _baseUrlProvider;
   final http.Client _client;
 
   Uri _uri(String path, [Map<String, String>? query]) {
-    final base = AppConfig.apiBaseUrl;
+    final base = _baseUrlProvider();
     final normalizedPath = path.startsWith('/') ? path.substring(1) : path;
     final baseUri = Uri.parse(base);
     return baseUri.replace(

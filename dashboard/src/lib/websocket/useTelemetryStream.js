@@ -7,7 +7,6 @@ export function useTelemetryStream(vehicleId) {
   const updateTelemetry = useTelemetryStore((s) => s.updateVehicleTelemetry);
   const setConnectionStatus = useTelemetryStore((s) => s.setConnectionStatus);
   const channelRef = useRef(null);
-  const orgId = useAuthStore((s) => s.user?.organization_id);
 
   useEffect(() => {
     if (!vehicleId) return;

@@ -8,6 +8,7 @@ export const authAPI = {
   refreshToken: (token) => apiClient.post('/auth/refresh', { refresh_token: token }),
   me: () => apiClient.get('/auth/me'),
   changePassword: (data) => apiClient.put('/auth/password', data),
+  requestPasswordRecovery: (data) => apiClient.post('/auth/password-recovery-request', data),
 };
 
 // ─── Fleet / Vehicle Endpoints ───
@@ -78,6 +79,7 @@ export const userAPI = {
   get: (id) => apiClient.get(`/auth/users/${id}`),
   create: (data) => apiClient.post('/auth/users', data),
   update: (id, data) => apiClient.put(`/auth/users/${id}`, data),
+  updatePassword: (id, password) => apiClient.put(`/auth/users/${id}/password`, { password }),
   deactivate: (id) => apiClient.delete(`/auth/users/${id}`),
   getRoles: () => apiClient.get('/auth/roles'),
   getAuditLog: (params) => apiClient.get('/auth/audit-log', { params }),

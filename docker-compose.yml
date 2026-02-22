@@ -109,7 +109,19 @@ services:
       OWNER_CREATE_ORG: "false"
       OWNER_ORG_NAME: AeroCommand HQ
       OWNER_ORG_SLUG: aerocommand
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:5173"]'
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:3001","http://localhost:5173","https://pi-group.vercel.app"]'
+      # Optional: allow Vercel preview deployments too
+      # CORS_ORIGIN_REGEX: 'https://.*\\.vercel\\.app'
+
+      # Password recovery request email (server-side SMTP)
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-touati.oussama@esprit.tn}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-}
+      SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
     ports:
       - "8000:8000"
     volumes:
@@ -145,6 +157,7 @@ services:
     environment:
       VITE_PROXY_TARGET: http://api-server:8000
       VITE_PROXY_WS_TARGET: ws://api-server:8000
+      VITE_SUPPORT_EMAIL: ${SUPPORT_EMAIL:-touati.oussama@esprit.tn}
 
 volumes:
   pg_data:

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Radar, Mail, Lock, Eye, EyeOff } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -16,6 +16,7 @@ export default function LoginPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const error = useAuthStore((s) => s.error);
   const navigate = useNavigate();
+  const location = useLocation();
   const mockLogin = useMockLogin();
   const mockEnabled = (() => {
     const stored = typeof window !== 'undefined' ? localStorage.getItem(MOCK_MODE_KEY) : null;
@@ -28,13 +29,18 @@ export default function LoginPage() {
     try {
       // Try real API first, fall back to mock login
       try {
-        await login({ email, password });
+        await login({ email: email.trim(), password: password.trim() });
       } catch (err) {
         if (!mockEnabled) throw err;
-        await mockLogin({ email, password });
+        await mockLogin({ email: email.trim(), password: password.trim() });
       }
-      navigate('/');
+      navigate(location.state?.from?.pathname || '/app');
     } catch { /* error set in store */ }
+  };
+
+  const goToPasswordRecovery = () => {
+    const q = email.trim() ? `?email=${encodeURIComponent(email.trim())}` : '';
+    navigate(`/password-recovery${q}`);
   };
 
   return (
@@ -91,7 +97,13 @@ export default function LoginPage() {
                 <input type="checkbox" className="rounded border-slate-600 bg-slate-800" />
                 Remember me
               </label>
-              <a href="#" className="text-blue-400 hover:text-blue-300">Forgot password?</a>
+              <button
+                type="button"
+                onClick={goToPasswordRecovery}
+                className="text-blue-400 hover:text-blue-300"
+              >
+                Forgot Password?
+              </button>
             </div>
             <Button type="submit" fullWidth loading={isLoading} size="lg">
               Sign In

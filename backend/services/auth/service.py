@@ -197,6 +197,10 @@ async def update_user_by_admin(db: AsyncSession, actor: dict, user_id: str, data
 
     payload = data.model_dump(exclude_unset=True)
 
+    # Normalize email for uniqueness checks.
+    if "email" in payload and payload["email"] is not None:
+        payload["email"] = str(payload["email"]).strip().lower()
+
     if str(db_user.id) == str(actor_user.id) and payload.get("is_active") is False:
         raise HTTPException(status_code=400, detail="You cannot disable your own account")
 
@@ -215,6 +219,11 @@ async def update_user_by_admin(db: AsyncSession, actor: dict, user_id: str, data
 
     await _ensure_organization_exists(db, requested_org_id)
 
+    if payload.get("email") and payload["email"] != db_user.email:
+        existing = (await db.execute(select(User).where(User.email == payload["email"]))).scalar_one_or_none()
+        if existing and str(existing.id) != str(db_user.id):
+            raise HTTPException(status_code=409, detail="Email already registered")
+
     for field, value in payload.items():
         if hasattr(db_user, field):
             setattr(db_user, field, value)
@@ -227,6 +236,31 @@ async def update_user_by_admin(db: AsyncSession, actor: dict, user_id: str, data
 async def deactivate_user_by_admin(db: AsyncSession, actor: dict, user_id: str) -> UserResponse:
     updated = await update_user_by_admin(db, actor, user_id, UserUpdate(is_active=False))
     return updated
+
+
+async def update_user_password_by_admin(db: AsyncSession, actor: dict, user_id: str, new_password: str) -> UserResponse:
+    actor_user = await _get_actor_user(db, actor)
+    actor_role = actor_user.role
+
+    stmt = select(User).where(User.id == UUID(user_id))
+    if actor_role == Role.ADMIN:
+        if not actor_user.organization_id:
+            raise HTTPException(status_code=400, detail="Organization context required")
+        stmt = stmt.where(User.organization_id == actor_user.organization_id)
+
+    db_user = (await db.execute(stmt)).scalar_one_or_none()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not _can_manage_user(actor_role, db_user.role):
+        raise HTTPException(status_code=403, detail="Insufficient permissions for target role")
+    if actor_role == Role.ADMIN and db_user.role in {Role.ADMIN, Role.SUPER_ADMIN}:
+        raise HTTPException(status_code=403, detail="Admins cannot modify admin-level users")
+
+    db_user.hashed_password = hash_password(new_password)
+    await db.flush()
+    await db.refresh(db_user)
+    return UserResponse.model_validate(db_user)
 
 
 async def list_organizations_for_actor(db: AsyncSession, actor: dict) -> list[OrganizationResponse]:

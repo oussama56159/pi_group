@@ -15,7 +15,7 @@ export default function ProtectedRoute({ children, requiredRoles }) {
   }
 
   if (requiredRoles && user && !requiredRoles.includes(user.role)) {
-    return <Navigate to="/unauthorized" replace />;
+    return <Navigate to="/app/unauthorized" replace />;
   }
 
   return children;
@@ -26,7 +26,7 @@ export function PublicRoute({ children }) {
   const location = useLocation();
 
   if (isAuthenticated) {
-    return <Navigate to={location.state?.from?.pathname || '/'} replace />;
+    return <Navigate to={location.state?.from?.pathname || '/app'} replace />;
   }
 
   return children;

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'src/api/api_client.dart';
 import 'src/api/mock_api_client.dart';
 import 'src/auth/auth_controller.dart';
+import 'src/config/endpoint_controller.dart';
 import 'src/realtime/realtime_controller.dart';
 import 'src/theme/theme_controller.dart';
 import 'src/ui/screens/login_screen.dart';
@@ -81,26 +82,35 @@ class AeroCommandApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeController()..load()),
-        ChangeNotifierProvider(create: (_) => AuthController()),
-        ProxyProvider<AuthController, ApiClient>(
-          update: (context, auth, previous) {
+        ChangeNotifierProvider(create: (_) => EndpointController()..load()),
+        ChangeNotifierProvider(
+          create: (context) => AuthController(
+            baseUrlProvider: () => context.read<EndpointController>().apiBaseUrl,
+          ),
+        ),
+        ProxyProvider2<AuthController, EndpointController, ApiClient>(
+          update: (context, auth, endpoints, previous) {
             if (auth.isDemo) {
               return (previous is MockApiClient) ? previous : MockApiClient();
             }
-            return HttpApiClient(tokenProvider: () => auth.accessToken);
+            return HttpApiClient(
+              tokenProvider: () => auth.accessToken,
+              baseUrlProvider: () => endpoints.apiBaseUrl,
+            );
           },
         ),
-        ChangeNotifierProxyProvider2<AuthController, ApiClient, RealtimeController>(
+        ChangeNotifierProxyProvider3<AuthController, ApiClient, EndpointController, RealtimeController>(
           create: (context) => RealtimeController(
             auth: context.read<AuthController>(),
             api: context.read<ApiClient>(),
+            endpoints: context.read<EndpointController>(),
           ),
-          update: (_, auth, api, previous) {
+          update: (_, auth, api, endpoints, previous) {
             if (previous == null) {
-              return RealtimeController(auth: auth, api: api);
+              return RealtimeController(auth: auth, api: api, endpoints: endpoints);
             }
-            if (!identical(previous.auth, auth) || !identical(previous.api, api)) {
-              return RealtimeController(auth: auth, api: api);
+            if (!identical(previous.auth, auth) || !identical(previous.api, api) || !identical(previous.endpoints, endpoints)) {
+              return RealtimeController(auth: auth, api: api, endpoints: endpoints);
             }
             return previous;
           },

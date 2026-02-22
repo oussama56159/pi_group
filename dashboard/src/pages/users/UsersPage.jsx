@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Search, UserX } from 'lucide-react';
+import { Plus, Search, UserX, Pencil } from 'lucide-react';
 import Card, { CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import Badge from '@/components/ui/Badge';
@@ -16,9 +16,16 @@ const roleColors = {
   viewer: 'gray',
 };
 
+const roleLabel = (role) => {
+  if (!role) return '';
+  if (role === 'super_admin') return 'Dev';
+  return role.replaceAll('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
 export default function UsersPage() {
   const currentUser = useAuthStore((s) => s.user);
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const isAdminOrDev = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const [users, setUsers] = useState([]);
   const [organizations, setOrganizations] = useState([]);
   const [orgMap, setOrgMap] = useState({});
@@ -41,6 +48,10 @@ export default function UsersPage() {
   });
   const [saving, setSaving] = useState(false);
   const [edits, setEdits] = useState({});
+
+  const [showEditUser, setShowEditUser] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', email: '', password: '' });
 
   const loadUsers = async () => {
     setLoading(true);
@@ -91,7 +102,8 @@ export default function UsersPage() {
         });
         setOrgMap(map);
         setOrgEdits(draft);
-      } catch {
+      } catch (err) {
+        setError(err?.response?.data?.detail || err?.message || 'Failed to load organizations');
       } finally {
         if (isMounted) setOrgLoading(false);
       }
@@ -177,6 +189,52 @@ export default function UsersPage() {
       await loadUsers();
     } catch (err) {
       setError(err?.response?.data?.detail || err?.message || 'Failed to deactivate user');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canManageUser = (targetUser) => {
+    if (!isAdminOrDev) return false;
+    if (!targetUser) return false;
+    if (currentUser?.role === 'super_admin') return true;
+    // Admins cannot modify admin-level users.
+    return targetUser.role !== 'admin' && targetUser.role !== 'super_admin';
+  };
+
+  const openEditUser = (u) => {
+    setEditUser(u);
+    setEditForm({
+      name: u?.name || '',
+      email: u?.email || '',
+      password: '',
+    });
+    setShowEditUser(true);
+  };
+
+  const handleEditUserSave = async () => {
+    if (!editUser) return;
+    setSaving(true);
+    setError('');
+    try {
+      const name = editForm.name.trim();
+      const email = editForm.email.trim();
+      const password = editForm.password;
+
+      await userAPI.update(editUser.id, {
+        name,
+        email,
+      });
+      if (password && password.trim().length > 0) {
+        await userAPI.updatePassword(editUser.id, password.trim());
+      }
+
+      setShowEditUser(false);
+      setEditUser(null);
+      setEditForm({ name: '', email: '', password: '' });
+      await loadUsers();
+    } catch (err) {
+      setError(err?.response?.data?.detail || err?.message || 'Failed to update user');
     } finally {
       setSaving(false);
     }
@@ -270,7 +328,7 @@ export default function UsersPage() {
         <select className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded-lg px-3 py-2.5"
           value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)}>
           <option value="all">All Roles</option>
-          <option value="super_admin">Super Admin</option>
+          <option value="super_admin">Dev</option>
           <option value="admin">Admin</option>
           <option value="pilot">Pilot</option>
           <option value="operator">Operator</option>
@@ -313,13 +371,14 @@ export default function UsersPage() {
                     <select
                       className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
                       value={edits[user.id]?.role || user.role}
+                      disabled={!canManageUser(user)}
                       onChange={(e) => setEdits((prev) => ({
                         ...prev,
                         [user.id]: { ...prev[user.id], role: e.target.value },
                       }))}
                     >
                       {Object.keys(roleColors).map((role) => (
-                        <option key={role} value={role}>{role}</option>
+                        <option key={role} value={role}>{roleLabel(role)}</option>
                       ))}
                     </select>
                   </td>
@@ -328,6 +387,7 @@ export default function UsersPage() {
                       <select
                         className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200 min-w-[180px]"
                         value={edits[user.id]?.organization_id || ''}
+                        disabled={!canManageUser(user)}
                         onChange={(e) => setEdits((prev) => ({
                           ...prev,
                           [user.id]: { ...prev[user.id], organization_id: e.target.value },
@@ -348,6 +408,7 @@ export default function UsersPage() {
                         type="checkbox"
                         className="accent-blue-500"
                         checked={edits[user.id]?.is_active ?? user.is_active}
+                        disabled={!canManageUser(user) || user.id === currentUser?.id}
                         onChange={(e) => setEdits((prev) => ({
                           ...prev,
                           [user.id]: { ...prev[user.id], is_active: e.target.checked },
@@ -363,6 +424,7 @@ export default function UsersPage() {
                       type="datetime-local"
                       className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-sm text-slate-200"
                       value={edits[user.id]?.expires_at || ''}
+                      disabled={!canManageUser(user)}
                       onChange={(e) => setEdits((prev) => ({
                         ...prev,
                         [user.id]: { ...prev[user.id], expires_at: e.target.value },
@@ -371,8 +433,25 @@ export default function UsersPage() {
                   </td>
                   <td className="px-5 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
-                      <Button size="sm" variant="secondary" onClick={() => handleSave(user.id)} loading={saving}>Save</Button>
-                      <button onClick={() => handleDeactivate(user.id)} className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-700/50"><UserX className="w-4 h-4" /></button>
+                      <Button size="sm" variant="secondary" onClick={() => handleSave(user.id)} loading={saving} disabled={!canManageUser(user)}>Save</Button>
+                      <button
+                        type="button"
+                        title="Edit"
+                        onClick={() => openEditUser(user)}
+                        disabled={!canManageUser(user)}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-slate-200 hover:bg-slate-700/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete"
+                        onClick={() => handleDeactivate(user.id)}
+                        disabled={!canManageUser(user) || user.id === currentUser?.id}
+                        className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-700/50 disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        <UserX className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -464,7 +543,7 @@ export default function UsersPage() {
             <label className="block text-sm font-medium text-slate-300 mb-1.5">Role</label>
             <select className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-300" value={newUser.role} onChange={(e) => setNewUser((s) => ({ ...s, role: e.target.value }))}>
               {Object.keys(roleColors).map((role) => (
-                <option key={role} value={role}>{role}</option>
+                <option key={role} value={role}>{roleLabel(role)}</option>
               ))}
             </select>
           </div>
@@ -490,6 +569,46 @@ export default function UsersPage() {
           </div>
           <Input label="Temporary Password" type="password" placeholder="••••••••" value={newUser.password} onChange={(e) => setNewUser((s) => ({ ...s, password: e.target.value }))} />
           <Input label="Expires At (optional)" type="datetime-local" value={newUser.expires_at} onChange={(e) => setNewUser((s) => ({ ...s, expires_at: e.target.value }))} />
+        </div>
+      </Modal>
+
+      {/* Edit User Modal */}
+      <Modal
+        isOpen={showEditUser}
+        onClose={() => setShowEditUser(false)}
+        title="Edit User"
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowEditUser(false)}>Cancel</Button>
+            <Button loading={saving} onClick={handleEditUserSave}>Save Changes</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <Input
+            label="Full Name"
+            placeholder="John Doe"
+            value={editForm.name}
+            onChange={(e) => setEditForm((s) => ({ ...s, name: e.target.value }))}
+          />
+          <Input
+            label="Email"
+            type="email"
+            placeholder="john@aerocommand.io"
+            value={editForm.email}
+            onChange={(e) => setEditForm((s) => ({ ...s, email: e.target.value }))}
+          />
+          <Input
+            label="New Password (optional)"
+            type="password"
+            placeholder="Leave blank to keep current"
+            value={editForm.password}
+            onChange={(e) => setEditForm((s) => ({ ...s, password: e.target.value }))}
+          />
+          <p className="text-xs text-slate-500">
+            Password reset is immediate. Share it securely with the user.
+          </p>
         </div>
       </Modal>
 

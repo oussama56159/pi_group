@@ -85,8 +85,16 @@ class BaseServiceSettings(BaseSettings):
 
     # ── CORS ──
     CORS_ORIGINS: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://localhost:3001"]
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173",
+            "https://pi-group.vercel.app",
+        ]
     )
+
+    # Optional regex for origin matching (useful for Vercel preview domains)
+    CORS_ORIGIN_REGEX: str | None = None
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

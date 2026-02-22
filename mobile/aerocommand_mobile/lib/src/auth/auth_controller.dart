@@ -4,14 +4,26 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api/api_client.dart';
 import '../api/api_error.dart';
 import '../app/app_mode.dart';
+import '../config/app_config.dart';
 import 'user_model.dart';
 
 class AuthController extends ChangeNotifier {
+  AuthController({String Function()? baseUrlProvider})
+      : _baseUrlProvider = baseUrlProvider ?? (() => AppConfig.apiBaseUrl);
+
   static const _keyAccess = 'aero_access_token';
   static const _keyRefresh = 'aero_refresh_token';
 
+  static const _keyRememberEnabled = 'aero_remember_enabled';
+  static const _keyRememberEmail = 'aero_remember_email';
+  static const _keyRememberPassword = 'aero_remember_password';
+
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
-  final ApiClient _anonClient = HttpApiClient(tokenProvider: () => null);
+  final String Function() _baseUrlProvider;
+  late final ApiClient _anonClient = HttpApiClient(
+    tokenProvider: () => null,
+    baseUrlProvider: _baseUrlProvider,
+  );
 
   UserModel? user;
   String? accessToken;
@@ -27,6 +39,36 @@ class AuthController extends ChangeNotifier {
   bool get isAuthenticated => user != null && (isDemo || (accessToken != null && accessToken!.isNotEmpty));
   String? get orgId => user?.organizationId;
   String get role => user?.role ?? 'viewer';
+
+  Future<RememberedCredentials?> loadRememberedCredentials() async {
+    final enabled = (await _storage.read(key: _keyRememberEnabled)) == '1';
+    if (!enabled) return null;
+
+    final email = await _storage.read(key: _keyRememberEmail);
+    final password = await _storage.read(key: _keyRememberPassword);
+    if (email == null || email.isEmpty || password == null || password.isEmpty) {
+      return null;
+    }
+
+    return RememberedCredentials(email: email, password: password);
+  }
+
+  Future<void> rememberCredentials({required bool remember, required String email, required String password}) async {
+    if (!remember) {
+      await clearRememberedCredentials();
+      return;
+    }
+
+    await _storage.write(key: _keyRememberEnabled, value: '1');
+    await _storage.write(key: _keyRememberEmail, value: email);
+    await _storage.write(key: _keyRememberPassword, value: password);
+  }
+
+  Future<void> clearRememberedCredentials() async {
+    await _storage.write(key: _keyRememberEnabled, value: '0');
+    await _storage.delete(key: _keyRememberEmail);
+    await _storage.delete(key: _keyRememberPassword);
+  }
 
   Future<void> restoreSession() async {
     final wasRestoring = isRestoring;
@@ -45,7 +87,10 @@ class AuthController extends ChangeNotifier {
         return;
       }
 
-      final client = HttpApiClient(tokenProvider: () => accessToken);
+      final client = HttpApiClient(
+        tokenProvider: () => accessToken,
+        baseUrlProvider: _baseUrlProvider,
+      );
       final me = await client.getJson('/auth/me');
       if (me is Map<String, dynamic>) {
         user = UserModel.fromJson(me);
@@ -94,7 +139,11 @@ class AuthController extends ChangeNotifier {
       await _storage.write(key: _keyAccess, value: accessToken);
       await _storage.write(key: _keyRefresh, value: refreshToken);
     } on ApiError catch (e) {
-      error = e.message;
+      error = 'Login failed (${e.statusCode}): ${e.message}';
+      rethrow;
+    } catch (e) {
+      // Network/TLS/DNS/etc.
+      error = 'Could not reach backend (${_baseUrlProvider()}): ${e.toString()}';
       rethrow;
     } finally {
       isLoading = false;
@@ -137,4 +186,11 @@ class AuthController extends ChangeNotifier {
     await _storage.delete(key: _keyRefresh);
     notifyListeners();
   }
+}
+
+class RememberedCredentials {
+  const RememberedCredentials({required this.email, required this.password});
+
+  final String email;
+  final String password;
 }

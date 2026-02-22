@@ -6,16 +6,17 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../api/api_client.dart';
 import '../auth/auth_controller.dart';
-import '../config/app_config.dart';
+import '../config/endpoint_controller.dart';
 import '../models/alert_model.dart';
 import '../mock/demo_repository.dart';
 import 'telemetry_summary.dart';
 
 class RealtimeController extends ChangeNotifier {
-  RealtimeController({required this.auth, required this.api});
+  RealtimeController({required this.auth, required this.api, required this.endpoints});
 
   final AuthController auth;
   final ApiClient api;
+  final EndpointController endpoints;
 
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -109,7 +110,7 @@ class RealtimeController extends ChangeNotifier {
     connectionState = 'connecting';
     notifyListeners();
 
-    final uri = Uri.parse(AppConfig.wsBaseUrl).replace(
+    final uri = Uri.parse(endpoints.wsBaseUrl).replace(
       queryParameters: {
         'channels': channels,
         'token': token,

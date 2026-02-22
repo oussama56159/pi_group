@@ -32,6 +32,7 @@ PUBLIC_PATHS = frozenset({
     "/redoc",
     "/openapi.json",
     "/api/v1/auth/login",
+    "/api/v1/auth/password-recovery-request",
     "/api/v1/auth/refresh",
 })
 

@@ -7,30 +7,8 @@ const DEFAULT_WS_BASE_URL = IS_BROWSER
   ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/v1/telemetry/ws`
   : 'ws://localhost:8000/api/v1/telemetry/ws';
 
-const deriveWsBaseUrlFromApiBaseUrl = (apiBaseUrl) => {
-  try {
-    if (!apiBaseUrl || typeof apiBaseUrl !== 'string') return null;
-    if (apiBaseUrl.startsWith('/')) return null; // same-origin relative API; default WS already covers this
-
-    const apiUrl = new URL(apiBaseUrl);
-    apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
-
-    const trimmedPath = apiUrl.pathname.replace(/\/$/, '');
-    const apiV1Path = trimmedPath.endsWith('/api/v1') ? trimmedPath : `${trimmedPath || ''}/api/v1`;
-    apiUrl.pathname = `${apiV1Path}/telemetry/ws`;
-    apiUrl.search = '';
-    apiUrl.hash = '';
-    return apiUrl.toString();
-  } catch {
-    return null;
-  }
-};
-
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL;
-export const WS_BASE_URL =
-  import.meta.env.VITE_WS_BASE_URL ||
-  deriveWsBaseUrlFromApiBaseUrl(API_BASE_URL) ||
-  DEFAULT_WS_BASE_URL;
+export const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || DEFAULT_WS_BASE_URL;
 const DEFAULT_MQTT_BROKER_URL = IS_BROWSER
   ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8083/mqtt`
   : 'ws://localhost:8083/mqtt';

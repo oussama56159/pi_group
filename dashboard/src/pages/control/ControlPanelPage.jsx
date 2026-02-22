@@ -32,14 +32,13 @@ function ControlActionButton({ actionId, icon: Icon, label, onAction, disabled, 
 
 export default function ControlPanelPage() {
   const vehiclesRaw = useFleetStore((s) => s.vehicles);
-  const vehicles = Array.isArray(vehiclesRaw) ? vehiclesRaw : [];
+  const vehicles = useMemo(() => (Array.isArray(vehiclesRaw) ? vehiclesRaw : []), [vehiclesRaw]);
   const sendCommand = useFleetStore((s) => s.sendCommand);
   const telemetry = useTelemetryStore((s) => s.vehicleTelemetry) || {};
   const connectionStatus = useTelemetryStore((s) => s.connectionStatus) || {};
   const addToast = useUIStore((s) => s.addToast);
   const [selectedId, setSelectedId] = useState('');
   const getActiveMissionForVehicle = useMissionStore((s) => s.getActiveMissionForVehicle);
-  const activeMission = selectedId ? getActiveMissionForVehicle(selectedId) : null;
   const fetchMissions = useMissionStore((s) => s.fetchMissions);
 
   const activeVehicles = useMemo(() => vehicles.filter((v) => v?.status !== 'offline'), [vehicles]);
@@ -48,29 +47,26 @@ export default function ControlPanelPage() {
     fetchMissions();
   }, [fetchMissions]);
 
-  useEffect(() => {
-    if (!activeVehicles.length) {
-      if (selectedId) setSelectedId('');
-      return;
-    }
-    const stillExists = activeVehicles.some((v) => v.id === selectedId);
-    if (!selectedId || !stillExists) {
-      setSelectedId(activeVehicles[0].id);
-    }
+  const effectiveSelectedId = useMemo(() => {
+    if (!activeVehicles.length) return '';
+    const stillExists = selectedId && activeVehicles.some((v) => v.id === selectedId);
+    return stillExists ? selectedId : activeVehicles[0].id;
   }, [activeVehicles, selectedId]);
 
-  useMissionStream(selectedId);
+  const activeMission = effectiveSelectedId ? getActiveMissionForVehicle(effectiveSelectedId) : null;
 
-  const vehicle = activeVehicles.find((v) => v.id === selectedId);
-  const t = telemetry[selectedId] || {};
-  const isConnected = connectionStatus[selectedId] === 'connected';
+  useMissionStream(effectiveSelectedId);
+
+  const vehicle = activeVehicles.find((v) => v.id === effectiveSelectedId);
+  const t = telemetry[effectiveSelectedId] || {};
+  const isConnected = connectionStatus[effectiveSelectedId] === 'connected';
   const disabledReason = isConnected ? undefined : 'Vehicle not connected';
   const modeLabel = t.mode || vehicle?.mode || 'Unknown';
   const armedLabel = vehicle?.armed ? 'ARMED' : 'DISARMED';
 
   const handleSend = async (cmd) => {
-    if (!selectedId) return;
-    await sendCommand(selectedId, { command: cmd });
+    if (!effectiveSelectedId) return;
+    await sendCommand(effectiveSelectedId, { command: cmd });
     addToast({
       type: 'success',
       title: 'Command Sent',
@@ -92,7 +88,7 @@ export default function ControlPanelPage() {
             {activeVehicles.map((v) => (
               <button key={v.id} onClick={() => setSelectedId(v.id)}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium transition-all ${
-                  selectedId === v.id ? 'bg-blue-600/20 border-blue-500/30 text-blue-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
+                  effectiveSelectedId === v.id ? 'bg-blue-600/20 border-blue-500/30 text-blue-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
                 }`}>
                 <StatusIndicator status={v.status} size="sm" />
                 <span>{v.name}</span>

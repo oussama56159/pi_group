@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'dart:convert';
-
 import '../../api/api_client.dart';
 import '../../models/vehicle_model.dart';
 import '../../realtime/realtime_controller.dart';
@@ -22,14 +20,12 @@ class _TelemetryTabState extends State<TelemetryTab> {
   bool _loadingVehicles = true;
   List<VehicleModel> _vehicles = const [];
   String? _selectedVehicleId;
+  String _vehicleQuery = '';
 
   TelemetryRange _range = TelemetryRange.min5;
   bool _loadingFullHistory = false;
   String? _fullHistoryError;
   List<TelemetrySummary>? _fullHistory;
-
-  Map<String, dynamic>? _latestSnapshot;
-  bool _loadingSnapshot = false;
 
   @override
   void initState() {
@@ -51,29 +47,9 @@ class _TelemetryTabState extends State<TelemetryTab> {
           _vehicles = items;
           _selectedVehicleId ??= items.isNotEmpty ? items.first.id : null;
         });
-        if (_selectedVehicleId != null) {
-          await _loadLatestSnapshot(_selectedVehicleId!);
-        }
       }
     } finally {
       setState(() => _loadingVehicles = false);
-    }
-  }
-
-  Future<void> _loadLatestSnapshot(String vehicleId) async {
-    setState(() => _loadingSnapshot = true);
-    try {
-      final api = context.read<ApiClient>();
-      final res = await api.getJson('/telemetry/vehicles/$vehicleId/latest');
-      if (res is Map) {
-        setState(() => _latestSnapshot = res.cast<String, dynamic>());
-      } else {
-        setState(() => _latestSnapshot = null);
-      }
-    } catch (_) {
-      setState(() => _latestSnapshot = null);
-    } finally {
-      setState(() => _loadingSnapshot = false);
     }
   }
 
@@ -133,11 +109,35 @@ class _TelemetryTabState extends State<TelemetryTab> {
     }
 
     if (_vehicles.isEmpty) {
-      return const Center(child: Text('No vehicles available.'));
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.sensors_off, size: 44, color: scheme.onSurfaceVariant),
+              const SizedBox(height: 10),
+              Text('No vehicles available', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 6),
+              Text(
+                'Once vehicles are registered, telemetry will appear here.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     final selected = _selectedVehicleId;
     final t = selected != null ? realtime.latestTelemetry[selected] : null;
+
+    final filteredVehicles = _filteredVehicles();
+    final selectedInFiltered = selected != null && filteredVehicles.any((v) => v.id == selected);
+    final effectiveSelected = selectedInFiltered
+      ? selected
+      : (filteredVehicles.isNotEmpty ? filteredVehicles.first.id : null);
 
     final historyRaw = selected == null
         ? const <TelemetrySummary>[]
@@ -150,16 +150,9 @@ class _TelemetryTabState extends State<TelemetryTab> {
       maxPoints: 700,
     );
 
-    final snapshotPretty = (_latestSnapshot == null)
-      ? null
-      : const JsonEncoder.withIndent('  ').convert(_latestSnapshot);
-
     return RefreshIndicator(
       onRefresh: () async {
         await _loadVehicles();
-        if (_selectedVehicleId != null) {
-          await _loadLatestSnapshot(_selectedVehicleId!);
-        }
         if (_selectedVehicleId != null && _range == TelemetryRange.full) {
           setState(() => _fullHistory = null);
           await _ensureFullHistory(_selectedVehicleId!);
@@ -174,19 +167,39 @@ class _TelemetryTabState extends State<TelemetryTab> {
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
-              child: DropdownButtonFormField<String>(
-                key: ValueKey(selected ?? 'none'),
-                initialValue: selected,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Vehicle',
-                ),
-                items: _vehicles.map((v) => DropdownMenuItem(value: v.id, child: Text(v.name))).toList(),
-                onChanged: (id) async {
-                  if (id == null) return;
-                  setState(() => _selectedVehicleId = id);
-                  await _loadLatestSnapshot(id);
-                },
+              child: Column(
+                children: [
+                  TextField(
+                    decoration: const InputDecoration(
+                      labelText: 'Quick switch',
+                      prefixIcon: Icon(Icons.search),
+                      hintText: 'Search by name or callsign',
+                    ),
+                    onChanged: (v) {
+                      setState(() {
+                        _vehicleQuery = v;
+                        final next = _filteredVehiclesForQuery(v);
+                        if (next.isNotEmpty && (_selectedVehicleId == null || !next.any((x) => x.id == _selectedVehicleId))) {
+                          _selectedVehicleId = next.first.id;
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(effectiveSelected ?? 'none'),
+                    initialValue: effectiveSelected,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Vehicle',
+                    ),
+                    items: filteredVehicles.map((v) => DropdownMenuItem(value: v.id, child: Text(v.name))).toList(),
+                    onChanged: (id) async {
+                      if (id == null) return;
+                      setState(() => _selectedVehicleId = id);
+                    },
+                  ),
+                ],
               ),
             ),
           ),
@@ -203,17 +216,23 @@ class _TelemetryTabState extends State<TelemetryTab> {
                     Text('Waiting for telemetry…', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))
                   else
                     Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _kv(context, 'Battery', '${t.batteryRemaining.toStringAsFixed(0)}%'),
+                        _sectionHeader(context, 'Power'),
+                        _kv(context, 'Battery', '${_batteryPct(t)}%'),
                         _kv(context, 'Mode', '${t.mode} • ${t.armed ? 'armed' : 'disarmed'}'),
-                        _kv(context, 'Position', '${t.lat.toStringAsFixed(5)}, ${t.lng.toStringAsFixed(5)}'),
-                        _kv(context, 'Altitude', '${t.alt.toStringAsFixed(1)} m'),
-                        _kv(context, 'Speed', '${t.groundspeed.toStringAsFixed(1)} m/s'),
-                        _kv(context, 'Heading', '${t.heading.toStringAsFixed(0)}°'),
                         if (t.signalStrength != null) _kv(context, 'Signal', '${t.signalStrength}%'),
                         if (t.temperatureC != null) _kv(context, 'Temp', '${t.temperatureC!.toStringAsFixed(1)}°C'),
-                        _kv(context, 'GPS', 'sats ${t.satellites} • fix ${t.gpsFix}'),
-                        _kv(context, 'Time', t.timestamp.toLocal().toIso8601String()),
+                        const SizedBox(height: 10),
+                        _sectionHeader(context, 'Position'),
+                        _kv(context, 'Lat/Lng', '${t.lat.toStringAsFixed(5)}, ${t.lng.toStringAsFixed(5)}'),
+                        _kv(context, 'Alt', '${t.alt.toStringAsFixed(1)} m'),
+                        _kv(context, 'Speed', '${t.groundspeed.toStringAsFixed(1)} m/s'),
+                        _kv(context, 'Heading', '${t.heading.toStringAsFixed(0)}°'),
+                        const SizedBox(height: 10),
+                        _sectionHeader(context, 'GPS'),
+                        _kv(context, 'Fix', 'type ${t.gpsFix} • sats ${t.satellites}'),
+                        _kv(context, 'Time', _formatTimestamp(t.timestamp)),
                       ],
                     ),
                 ],
@@ -266,8 +285,8 @@ class _TelemetryTabState extends State<TelemetryTab> {
               Expanded(
                 child: RadialGaugeCard(
                   title: 'Battery',
-                  value01: (t?.batteryRemaining ?? 0) / 100.0,
-                  valueLabel: t == null ? '—' : '${t.batteryRemaining.toStringAsFixed(0)}%',
+                  value01: t == null ? 0 : _battery01(t),
+                  valueLabel: t == null ? '—' : '${_batteryPct(t)}%',
                   subtitle: t?.mode,
                   onTap: selected == null
                       ? null
@@ -396,34 +415,6 @@ class _TelemetryTabState extends State<TelemetryTab> {
                     },
             ),
           ],
-
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Latest Snapshot', style: Theme.of(context).textTheme.titleMedium),
-                      TextButton(
-                        onPressed: (_selectedVehicleId == null || _loadingSnapshot)
-                            ? null
-                            : () => _loadLatestSnapshot(_selectedVehicleId!),
-                        child: _loadingSnapshot ? const Text('Loading…') : const Text('Refresh'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_latestSnapshot == null)
-                    Text('No snapshot available yet.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))
-                  else
-                    SelectableText(snapshotPretty ?? ''),
-                ],
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -453,5 +444,44 @@ class _TelemetryTabState extends State<TelemetryTab> {
         ],
       ),
     );
+  }
+
+  List<VehicleModel> _filteredVehicles() => _filteredVehiclesForQuery(_vehicleQuery);
+
+  List<VehicleModel> _filteredVehiclesForQuery(String query) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return _vehicles;
+    return _vehicles
+        .where((v) => v.name.toLowerCase().contains(q) || v.callsign.toLowerCase().contains(q))
+        .toList(growable: false);
+  }
+
+  int _batteryPct(TelemetrySummary t) {
+    final raw = t.batteryRemaining;
+    final pct = raw <= 1.0 ? (raw * 100.0) : raw;
+    return pct.clamp(0.0, 100.0).round();
+  }
+
+  double _battery01(TelemetrySummary t) {
+    return _batteryPct(t) / 100.0;
+  }
+
+  Widget _sectionHeader(BuildContext context, String title) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant),
+      ),
+    );
+  }
+
+  String _formatTimestamp(DateTime ts) {
+    final local = ts.toLocal();
+    final h = local.hour.toString().padLeft(2, '0');
+    final m = local.minute.toString().padLeft(2, '0');
+    final s = local.second.toString().padLeft(2, '0');
+    return '$h:$m:$s';
   }
 }

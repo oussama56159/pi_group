@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,7 +20,6 @@ class _DroneDetailsScreenState extends State<DroneDetailsScreen> {
   String? _error;
 
   Map<String, dynamic>? _vehicle;
-  Map<String, dynamic>? _latestSnapshot;
 
   @override
   void initState() {
@@ -42,23 +39,13 @@ class _DroneDetailsScreenState extends State<DroneDetailsScreen> {
       final vehicleRes = await api.getJson('/fleet/vehicles/${widget.vehicleId}');
       final vehicleMap = (vehicleRes is Map) ? vehicleRes.cast<String, dynamic>() : null;
 
-      Map<String, dynamic>? snapshotMap;
-      try {
-        final snapRes = await api.getJson('/telemetry/vehicles/${widget.vehicleId}/latest');
-        snapshotMap = (snapRes is Map) ? snapRes.cast<String, dynamic>() : null;
-      } catch (_) {
-        snapshotMap = null;
-      }
-
       setState(() {
         _vehicle = vehicleMap;
-        _latestSnapshot = snapshotMap;
       });
     } catch (e) {
       setState(() {
         _error = e.toString();
         _vehicle = null;
-        _latestSnapshot = null;
       });
     } finally {
       setState(() => _loading = false);
@@ -78,10 +65,6 @@ class _DroneDetailsScreenState extends State<DroneDetailsScreen> {
     final callsign = _vehicle?['callsign']?.toString();
     final status = _vehicle?['status']?.toString();
     final fleetId = _vehicle?['fleet_id']?.toString();
-
-    final snapshotPretty = (_latestSnapshot == null)
-        ? null
-        : const JsonEncoder.withIndent('  ').convert(_latestSnapshot);
 
     return Scaffold(
       appBar: AppBar(
@@ -186,33 +169,33 @@ class _DroneDetailsScreenState extends State<DroneDetailsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text('Latest snapshot', style: Theme.of(context).textTheme.titleMedium),
+                              Expanded(
+                                child: Text('Camera', style: Theme.of(context).textTheme.titleMedium),
+                              ),
                               IconButton(
-                                tooltip: 'Refresh',
-                                onPressed: _load,
-                                icon: const Icon(Icons.refresh),
+                                tooltip: 'Full screen',
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const _CameraPreviewFullscreenScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.open_in_full),
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
-                          if (snapshotPretty == null)
-                            Text('No snapshot available.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant))
-                          else
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: scheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: scheme.outlineVariant),
-                              ),
-                              child: Text(
-                                snapshotPretty,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-                              ),
-                            ),
+                          _CameraPreviewFrame(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const _CameraPreviewFullscreenScreen(),
+                                ),
+                              );
+                            },
+                          ),
                         ],
                       ),
                     ),
@@ -237,6 +220,72 @@ class _DroneDetailsScreenState extends State<DroneDetailsScreen> {
           const SizedBox(width: 12),
           Expanded(child: Text(v, style: Theme.of(context).textTheme.bodyMedium)),
         ],
+      ),
+    );
+  }
+}
+
+class _CameraPreviewFullscreenScreen extends StatelessWidget {
+  const _CameraPreviewFullscreenScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Camera'),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: _CameraPreviewFrame(
+              onTap: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CameraPreviewFrame extends StatelessWidget {
+  const _CameraPreviewFrame({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Ink(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.videocam_outlined, size: 40, color: scheme.onSurfaceVariant),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Live video coming soon … once the backend streaming endpoint is implemented.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

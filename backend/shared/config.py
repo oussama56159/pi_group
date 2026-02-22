@@ -88,8 +88,39 @@ class BaseServiceSettings(BaseSettings):
 
     # ── CORS ──
     CORS_ORIGINS: list[str] = Field(
-        default_factory=lambda: ["http://localhost:3000", "http://localhost:3001"]
+        default_factory=lambda: [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:5173",
+            "https://pi-group.vercel.app",
+        ]
     )
+
+    # Optional regex for origin matching (useful for Vercel preview domains)
+    CORS_ORIGIN_REGEX: str | None = None
+
+    # ── Email (SMTP) ──
+    # Used for server-side email sending (e.g., password recovery requests from the web UI).
+    SUPPORT_EMAIL: str = "touati.oussama@esprit.tn"
+
+    # NOTE: Do not hardcode SMTP credentials in source control.
+    # Configure these via environment variables / Docker secrets.
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+    SMTP_USE_STARTTLS: bool = True
+    SMTP_USE_SSL: bool = False
+
+    @field_validator("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod

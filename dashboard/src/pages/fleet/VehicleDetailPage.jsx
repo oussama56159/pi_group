@@ -44,7 +44,7 @@ export default function VehicleDetailPage() {
     return (
       <div className="text-center py-16">
         <p className="text-slate-400">Vehicle not found</p>
-        <Link to="/fleet" className="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">Back to Fleet</Link>
+        <Link to="/app/fleet" className="text-blue-400 hover:text-blue-300 text-sm mt-2 inline-block">Back to Fleet</Link>
       </div>
     );
   }
@@ -66,7 +66,7 @@ export default function VehicleDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link to="/fleet" className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
+        <Link to="/app/fleet" className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors">
           <ChevronLeft className="w-5 h-5" />
         </Link>
         <div className="flex-1">

@@ -3,9 +3,12 @@ Auth REST API routes.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.shared.config import get_base_settings
+from backend.shared.email import EmailSendError, send_email_smtp
 from backend.shared.database.postgres import get_postgres_session
 from backend.shared.schemas.auth import (
     LoginRequest,
@@ -36,9 +39,68 @@ from .service import (
     refresh_tokens,
     update_organization_by_owner,
     update_user_by_admin,
+    update_user_password_by_admin,
 )
 
 router = APIRouter()
+
+
+class _PasswordUpdateRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
+class _PasswordRecoveryRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    message: str = Field(min_length=10, max_length=4000)
+
+
+@router.post("/password-recovery-request")
+async def password_recovery_request(payload: _PasswordRecoveryRequest, request: Request):
+    """Send a password reset request email to Dev/Admin support.
+
+    This endpoint is intentionally public and does not confirm whether a user exists.
+    """
+    from pydantic import EmailStr, TypeAdapter
+    from fastapi import HTTPException
+
+    # Validate email format using Pydantic's EmailStr
+    try:
+        email_adapter = TypeAdapter(EmailStr)
+        normalized_email = str(email_adapter.validate_python(payload.email.strip())).strip()
+    except Exception:
+        raise HTTPException(status_code=422, detail="Enter a valid email address")
+
+    settings = get_base_settings()
+    if not settings.SMTP_HOST:
+        raise HTTPException(status_code=503, detail="Email sending is not configured on the server")
+
+    client_ip = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "")
+
+    subject = "Password reset request - AeroCommand"
+    body = "\n".join(
+        [
+            payload.message.strip(),
+            "",
+            "---",
+            f"Requested email: {normalized_email}",
+            f"Client IP: {client_ip}",
+            f"User-Agent: {user_agent}",
+        ]
+    )
+
+    try:
+        await send_email_smtp(
+            settings,
+            to_email=settings.SUPPORT_EMAIL,
+            subject=subject,
+            body=body,
+            reply_to=normalized_email,
+        )
+    except EmailSendError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to send email: {e}")
+
+    return {"detail": "Request sent"}
 
 
 @router.post("/register", response_model=UserResponse, status_code=201,
@@ -177,6 +239,17 @@ async def update_user(
     db: AsyncSession = Depends(get_postgres_session),
 ):
     return await update_user_by_admin(db, user, user_id, data)
+
+
+@router.put("/users/{user_id}/password", response_model=UserResponse, dependencies=[Depends(RequireRole(Role.ADMIN))])
+async def update_user_password(
+    user_id: str,
+    data: _PasswordUpdateRequest,
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_postgres_session),
+):
+    """Reset a user's password (admin/super-admin)."""
+    return await update_user_password_by_admin(db, user, user_id, data.password)
 
 
 @router.delete("/users/{user_id}", response_model=UserResponse, dependencies=[Depends(RequireRole(Role.ADMIN))])

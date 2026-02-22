@@ -11,6 +11,14 @@ class AlertsTab extends StatelessWidget {
     return severity == 'critical' || severity == 'emergency';
   }
 
+  Color _severityColor(ColorScheme scheme, String severity) {
+    final s = severity.toLowerCase();
+    if (s == 'critical' || s == 'emergency') return scheme.error;
+    if (s == 'warning') return scheme.tertiary;
+    if (s == 'info') return scheme.primary;
+    return scheme.outline;
+  }
+
   @override
   Widget build(BuildContext context) {
     final realtime = context.watch<RealtimeController>();
@@ -44,8 +52,19 @@ class AlertsTab extends StatelessWidget {
           if (realtime.alerts.isEmpty)
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text('No alerts.', style: Theme.of(context).textTheme.bodyMedium),
+                padding: const EdgeInsets.all(18),
+                child: Row(
+                  children: [
+                    Icon(Icons.notifications_none, color: scheme.onSurfaceVariant),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'No alerts right now. When something needs attention, it will show up here.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             )
           else
@@ -53,33 +72,47 @@ class AlertsTab extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Card(
-                  child: ListTile(
-                    leading: Icon(
-                      _isCritical(a.severity) ? Icons.error_outline : Icons.warning_amber_rounded,
-                      color: _isCritical(a.severity) ? scheme.error : scheme.tertiary,
-                    ),
-                    title: Row(
-                      children: [
-                        Expanded(child: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                        const SizedBox(width: 8),
-                        Chip(
-                          label: Text(a.severity),
-                          visualDensity: VisualDensity.compact,
+                  clipBehavior: Clip.antiAlias,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(
+                          color: _severityColor(scheme, a.severity),
+                          width: 5,
                         ),
-                      ],
+                      ),
                     ),
-                    subtitle: Text(
-                      '${a.category} • ${df.format(a.createdAt.toLocal())}\n${a.message}',
-                      maxLines: 3,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: a.acknowledged
-                        ? Icon(Icons.check_circle, color: scheme.primary)
-                        : TextButton(
-                            onPressed: () => context.read<RealtimeController>().acknowledgeAlert(a.id),
-                            child: const Text('Ack'),
+                    child: ListTile(
+                      leading: Icon(
+                        _isCritical(a.severity) ? Icons.error_outline : Icons.warning_amber_rounded,
+                        color: _severityColor(scheme, a.severity),
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(child: Text(a.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: 8),
+                          Chip(
+                            label: Text(a.severity),
+                            visualDensity: VisualDensity.compact,
                           ),
-                    isThreeLine: true,
+                        ],
+                      ),
+                      subtitle: Text(
+                        '${a.category} • ${df.format(a.createdAt.toLocal())}\n${a.message}',
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: a.acknowledged
+                          ? FilledButton.tonal(
+                              onPressed: null,
+                              child: const Text('Acked'),
+                            )
+                          : FilledButton(
+                              onPressed: () => context.read<RealtimeController>().acknowledgeAlert(a.id),
+                              child: const Text('Acknowledge'),
+                            ),
+                      isThreeLine: true,
+                    ),
                   ),
                 ),
               ),

@@ -9,6 +9,7 @@ import '../tabs/dashboard_tab.dart';
 import '../tabs/fleet_tab.dart';
 import '../tabs/missions_tab.dart';
 import '../tabs/telemetry_tab.dart';
+import 'profile_screen.dart';
 import '../widgets/drone_logo.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -63,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('AeroCommand (${auth.user?.name ?? ''})'),
+        title: const Text('AeroCommand'),
         actions: [
           if (auth.isDemo)
             Padding(
@@ -98,14 +99,13 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icon(theme.isDark ? Icons.light_mode : Icons.dark_mode),
           ),
           IconButton(
-            tooltip: 'Logout',
-            onPressed: () async {
-              final realtime = context.read<RealtimeController>();
-              final auth = context.read<AuthController>();
-              await realtime.disconnect();
-              await auth.logout();
+            tooltip: 'Profile',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+              );
             },
-            icon: const Icon(Icons.logout),
+            icon: const Icon(Icons.person_outline),
           ),
         ],
       ),

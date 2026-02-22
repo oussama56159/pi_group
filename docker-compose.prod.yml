@@ -115,6 +115,16 @@ services:
       OWNER_CREATE_ORG: ${OWNER_CREATE_ORG:-false}
       OWNER_ORG_NAME: ${OWNER_ORG_NAME:-AeroCommand HQ}
       OWNER_ORG_SLUG: ${OWNER_ORG_SLUG:-aerocommand}
+
+      # Password recovery request email (server-side SMTP)
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL}
+      SMTP_USE_STARTTLS: ${SMTP_USE_STARTTLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
     ports:
       - "8000:8000"
     depends_on:
