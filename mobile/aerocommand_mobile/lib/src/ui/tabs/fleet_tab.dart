@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
@@ -12,6 +14,8 @@ import '../../realtime/telemetry_summary.dart';
 import '../screens/drone_details_screen.dart';
 import '../screens/fleet_map_fullscreen_screen.dart';
 import '../widgets/drone_logo.dart';
+import '../widgets/drone_map_marker.dart';
+import '../widgets/drone_map_styles.dart';
 
 class FleetTab extends StatefulWidget {
   const FleetTab({super.key});
@@ -25,6 +29,9 @@ class _FleetTabState extends State<FleetTab> {
   String? _error;
   List<VehicleModel> _vehicles = const [];
 
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
   static const _defaultCenter = LatLng(36.8065, 10.1815);
   static const _defaultZoom = 13.0;
   static const _tileUrlTemplate = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
@@ -34,6 +41,22 @@ class _FleetTabState extends State<FleetTab> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<VehicleModel> _filteredVehicles() {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _vehicles;
+    return _vehicles.where((v) {
+      final name = v.name.toLowerCase();
+      final callsign = v.callsign.toLowerCase();
+      return name.contains(q) || callsign.contains(q);
+    }).toList();
   }
 
   Future<void> _load() async {
@@ -65,6 +88,8 @@ class _FleetTabState extends State<FleetTab> {
     final auth = context.watch<AuthController>();
     final endpoints = context.watch<EndpointController>();
 
+    final vehicles = _filteredVehicles();
+
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -81,8 +106,30 @@ class _FleetTabState extends State<FleetTab> {
 
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+            child: TextField(
+              controller: _searchController,
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Search fleet (name or callsign)',
+                suffixIcon: _query.trim().isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
             child: _FleetMapCard(
-              vehicles: _vehicles,
+              vehicles: vehicles,
               realtime: realtime,
               defaultCenter: _defaultCenter,
               defaultZoom: _defaultZoom,
@@ -98,9 +145,17 @@ class _FleetTabState extends State<FleetTab> {
               role: auth.role,
               isDemo: auth.isDemo,
             )
+          else if (vehicles.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Text(
+                'No matches for "${_query.trim()}"',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant),
+              ),
+            )
           else ...[
             const SizedBox(height: 10),
-            for (final v in _vehicles)
+            for (final v in vehicles)
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
                 child: _VehicleAtAGlanceCard(
@@ -152,20 +207,26 @@ class _FleetMapCard extends StatefulWidget {
 class _FleetMapCardState extends State<_FleetMapCard> {
   final MapController _mapController = MapController();
 
+  String? _selectedVehicleId;
+  bool _legendCollapsed = false;
+
   List<_VehicleMarker> _markers() {
     final markers = <_VehicleMarker>[];
     for (final v in widget.vehicles) {
       final t = widget.realtime.latestTelemetry[v.id];
       if (t == null) continue;
       if (t.lat == 0 || t.lng == 0) continue;
+
+      final state = DroneMapStyle.stateFrom(status: v.status, armed: t.armed);
       markers.add(
         _VehicleMarker(
           vehicleId: v.id,
           name: v.name,
-          status: v.status,
-          armed: t.armed,
+          state: state,
           headingDeg: t.heading,
           point: LatLng(t.lat, t.lng),
+          altMeters: t.alt,
+          speedMps: t.groundspeed,
         ),
       );
     }
@@ -203,109 +264,150 @@ class _FleetMapCardState extends State<_FleetMapCard> {
 
     return Card(
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 280,
-        child: Stack(
-          children: [
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: widget.defaultCenter,
-                initialZoom: widget.defaultZoom,
-                minZoom: 3,
-                maxZoom: 22,
-              ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            height: 280,
+            child: Stack(
               children: [
-                TileLayer(
-                  urlTemplate: widget.tileUrlTemplate,
-                  subdomains: widget.tileSubdomains,
-                  userAgentPackageName: 'aerocommand_mobile',
-                ),
-                MarkerLayer(
-                  markers: [
-                    for (final m in markers)
-                      Marker(
-                        point: m.point,
-                        width: 36,
-                        height: 36,
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => DroneDetailsScreen(vehicleId: m.vehicleId, initialName: m.name),
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: widget.defaultCenter,
+                    initialZoom: widget.defaultZoom,
+                    minZoom: 3,
+                    maxZoom: 22,
+                    onTap: (_, __) => setState(() => _selectedVehicleId = null),
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: widget.tileUrlTemplate,
+                      subdomains: widget.tileSubdomains,
+                      userAgentPackageName: 'aerocommand_mobile',
+                    ),
+                    MarkerClusterLayerWidget(
+                      options: MarkerClusterLayerOptions(
+                        markers: [
+                          for (final m in markers)
+                            Marker(
+                              key: ValueKey('map-marker-${m.vehicleId}'),
+                              point: m.point,
+                              width: _selectedVehicleId == m.vehicleId ? 220 : 48,
+                              height: 48,
+                              child: DroneMapMarker(
+                                key: ValueKey('drone-marker-${m.vehicleId}'),
+                                vm: DroneMarkerViewModel(
+                                  vehicleId: m.vehicleId,
+                                  name: m.name,
+                                  state: m.state,
+                                  headingDeg: m.headingDeg,
+                                  altMeters: m.altMeters,
+                                  speedMps: m.speedMps,
+                                ),
+                                selected: _selectedVehicleId == m.vehicleId,
+                                showLabel: _selectedVehicleId == m.vehicleId,
+                                onTap: () {
+                                  if (_selectedVehicleId != m.vehicleId) {
+                                    setState(() => _selectedVehicleId = m.vehicleId);
+                                    return;
+                                  }
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => DroneDetailsScreen(vehicleId: m.vehicleId, initialName: m.name),
+                                    ),
+                                  );
+                                },
                               ),
-                            );
-                          },
-                          child: Transform.rotate(
-                            angle: (m.headingDeg) * 3.141592653589793 / 180.0,
-                            child: DroneLogo(
-                              size: 30,
-                              color: _statusColor(scheme, m.status, m.armed),
                             ),
-                          ),
-                        ),
+                        ],
+                        maxClusterRadius: 42,
+                        size: const Size(44, 44),
+                        builder: (context, clusterMarkers) {
+                          return DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: scheme.surface.withValues(alpha: 0.92),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.65)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Theme.of(context).shadowColor.withValues(alpha: 0.35),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Text(
+                                clusterMarkers.length.toString(),
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    if (markers.isNotEmpty)
+                      RichAttributionWidget(
+                        alignment: AttributionAlignment.bottomRight,
+                        attributions: [
+                          TextSourceAttribution('© OpenStreetMap contributors'),
+                          TextSourceAttribution('© CARTO'),
+                        ],
                       ),
                   ],
                 ),
-                if (markers.isNotEmpty)
-                  RichAttributionWidget(
-                    alignment: AttributionAlignment.bottomRight,
-                    attributions: [
-                      TextSourceAttribution('© OpenStreetMap contributors'),
-                      TextSourceAttribution('© CARTO'),
-                    ],
-                  ),
-              ],
-            ),
-            Positioned(
-              left: 12,
-              top: 12,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  child: Text(
-                    markers.isEmpty ? 'Waiting for live GPS…' : 'Live positions: ${markers.length}',
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 8,
-              top: 8,
-              child: IconButton.filledTonal(
-                tooltip: 'Full screen map',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => FleetMapFullscreenScreen(
-                        vehicles: widget.vehicles,
-                        defaultCenter: widget.defaultCenter,
-                        defaultZoom: widget.defaultZoom,
-                        tileUrlTemplate: widget.tileUrlTemplate,
-                        tileSubdomains: widget.tileSubdomains,
+                Positioned(
+                  left: 12,
+                  top: 12,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surface.withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      child: Text(
+                        markers.isEmpty ? 'Waiting for live GPS…' : 'Live positions: ${markers.length}',
+                        style: Theme.of(context).textTheme.labelMedium,
                       ),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.open_in_full),
-              ),
+                  ),
+                ),
+                Positioned(
+                  right: 8,
+                  top: 8,
+                  child: IconButton.filledTonal(
+                    tooltip: 'Full screen map',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => FleetMapFullscreenScreen(
+                            vehicles: widget.vehicles,
+                            defaultCenter: widget.defaultCenter,
+                            defaultZoom: widget.defaultZoom,
+                            tileUrlTemplate: widget.tileUrlTemplate,
+                            tileSubdomains: widget.tileSubdomains,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.open_in_full),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+            child: DroneStateLegend(
+              collapsed: _legendCollapsed,
+              onToggleCollapsed: () => setState(() => _legendCollapsed = !_legendCollapsed),
+            ),
+          ),
+        ],
       ),
     );
-  }
-
-  Color _statusColor(ColorScheme scheme, String status, bool armed) {
-    if (armed) return scheme.error;
-    if (status == 'in_flight') return scheme.primary;
-    if (status == 'online') return scheme.tertiary;
-    return scheme.outline;
   }
 }
 
@@ -313,18 +415,20 @@ class _VehicleMarker {
   _VehicleMarker({
     required this.vehicleId,
     required this.name,
-    required this.status,
-    required this.armed,
+    required this.state,
     required this.headingDeg,
     required this.point,
+    required this.altMeters,
+    required this.speedMps,
   });
 
   final String vehicleId;
   final String name;
-  final String status;
-  final bool armed;
+  final DroneOperationalState state;
   final double headingDeg;
   final LatLng point;
+  final double altMeters;
+  final double speedMps;
 }
 
 class _FleetEmptyState extends StatelessWidget {

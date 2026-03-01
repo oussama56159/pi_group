@@ -32,11 +32,10 @@ Enable with environment variables:
 - `AEROCOMMAND_ORG_ID=<org uuid>`
 - `AEROCOMMAND_VEHICLE_ID=<vehicle uuid>` (optional; defaults to `DRONE_CLIENT_ID` / `ROBOT_CLIENT_ID`)
 
-To quickly get your `org_id` and vehicle IDs from the running API, you can use:
+How to get IDs from the running API:
 
-```bash
-python scripts/get_org_and_vehicle_ids.py
-```
+- `org_id`: login, then call `GET /api/v1/auth/me` and read `organization_id`
+- `vehicle_id`: call `GET /api/v1/fleet/vehicles` (or create a vehicle in the dashboard and copy its `id`)
 
 ## Example Control Payload
 

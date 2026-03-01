@@ -7,6 +7,7 @@ import 'src/auth/auth_controller.dart';
 import 'src/config/endpoint_controller.dart';
 import 'src/realtime/realtime_controller.dart';
 import 'src/theme/theme_controller.dart';
+import 'src/ui/screens/landing_screen.dart';
 import 'src/ui/screens/login_screen.dart';
 import 'src/ui/screens/home_screen.dart';
 import 'src/ui/widgets/loading_view.dart';
@@ -20,10 +21,41 @@ class AeroCommandApp extends StatelessWidget {
   const AeroCommandApp({super.key});
 
   ThemeData _buildTheme(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: Colors.blueGrey,
-      brightness: brightness,
-    );
+    final scheme = brightness == Brightness.light
+        ? const ColorScheme(
+            brightness: Brightness.light,
+            primary: Color(0xFF00B8FF),
+            onPrimary: Color(0xFFFFFFFF),
+            primaryContainer: Color(0xFFCCF1FF),
+            onPrimaryContainer: Color(0xFF001D2A),
+            secondary: Color(0xFF00E5FF),
+            onSecondary: Color(0xFF001B1F),
+            secondaryContainer: Color(0xFFB8F5FF),
+            onSecondaryContainer: Color(0xFF002126),
+            tertiary: Color(0xFF7C4DFF),
+            onTertiary: Color(0xFFFFFFFF),
+            tertiaryContainer: Color(0xFFE5DDFF),
+            onTertiaryContainer: Color(0xFF21005D),
+            error: Color(0xFFB3261E),
+            onError: Color(0xFFFFFFFF),
+            errorContainer: Color(0xFFF9DEDC),
+            onErrorContainer: Color(0xFF410E0B),
+            surface: Color(0xFFFFFFFF),
+            onSurface: Color(0xFF0B1B3A),
+            surfaceContainerHighest: Color(0xFFF4F7FF),
+            onSurfaceVariant: Color(0xFF354155),
+            outline: Color(0xFF98A2B3),
+            outlineVariant: Color(0xFFD0D5DD),
+            shadow: Color(0xFF000000),
+            scrim: Color(0xFF000000),
+            inverseSurface: Color(0xFF0B1B3A),
+            onInverseSurface: Color(0xFFF4F7FF),
+            inversePrimary: Color(0xFF66D3FF),
+          )
+        : ColorScheme.fromSeed(
+            seedColor: Colors.blueGrey,
+            brightness: brightness,
+          );
 
     return ThemeData(
       useMaterial3: true,
@@ -33,6 +65,20 @@ class AeroCommandApp extends StatelessWidget {
         centerTitle: false,
         backgroundColor: scheme.surface,
         foregroundColor: scheme.onSurface,
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: scheme.primary,
+          foregroundColor: scheme.onPrimary,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: scheme.primary,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
       cardTheme: CardThemeData(
         color: scheme.surfaceContainerHighest,
@@ -140,6 +186,8 @@ class _Root extends StatefulWidget {
 }
 
 class _RootState extends State<_Root> {
+  bool _showLanding = true;
+
   @override
   void initState() {
     super.initState();
@@ -158,6 +206,11 @@ class _RootState extends State<_Root> {
     }
 
     if (!auth.isAuthenticated) {
+      if (_showLanding) {
+        return LandingScreen(
+          onGetStarted: () => setState(() => _showLanding = false),
+        );
+      }
       return const LoginScreen();
     }
 

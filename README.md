@@ -1,70 +1,153 @@
-# AeroCommand (PI Group)
+# AeroCommand
 
-AeroCommand is a cloud + edge platform for drone/robot fleet management.
+**AeroCommand** is a full-stack cloud + edge platform for real-time drone and robot fleet management. It connects physical vehicles (via Pixhawk flight controllers and Raspberry Pi edge agents) to a centralized backend, and delivers live telemetry, command & control, mission planning, and alerting through both a **web dashboard** and a **mobile app**.
 
-## Repo layout
+---
 
-- `backend/` – FastAPI API gateway + service modules (auth, fleet, mission, telemetry, alert)
-- `dashboard/` – React/Vite web UI
-- `infra/` – Kubernetes manifests and Helm chart
-- `shared_python/` – Shared Python library (schemas, MQTT topics, config, MAVLink defs)
-- `edge-agent/` – Raspberry Pi edge agent (Pixhawk MAVLink ↔ cloud MQTT)
+## What it does
 
-## High-level architecture
+- **Real-time telemetry** — Sensor data (GPS, altitude, speed, attitude, battery, etc.) flows from each drone's Pixhawk flight controller over MAVLink to a Raspberry Pi, which publishes it via MQTT to the cloud backend. The backend validates, stores, caches, and broadcasts the data over WebSocket to all connected clients in real time.
+- **Fleet management** — Register, organize, and monitor all your drones and robots. Group vehicles into fleets, assign users to fleets, and view live status for every vehicle.
+- **Mission planning** — Create waypoint-based missions with a visual planner (map-based), assign missions to vehicles, upload them, and track execution status live.
+- **Command & control** — Send commands to vehicles in real time (arm, disarm, takeoff, land, RTL, emergency stop, etc.) from the dashboard or mobile app. Commands are routed through MQTT to the edge agent, which translates them into MAVLink instructions for the Pixhawk.
+- **Alerts & rules** — Configurable alert rules trigger on telemetry conditions (low battery, geofence breach, signal loss, etc.). Alerts are pushed in real time to all connected clients and stored for review.
+- **Analytics** — Historical telemetry charts, flight hours, mission statistics, and incident reports.
+- **Multi-tenant & role-based access** — Organizations, role-based permissions (Super Admin, Admin, Operator, Pilot, Viewer), and user management built in.
+- **Mobile app** — A Flutter (Android/iOS) companion app with the same telemetry, fleet, mission, alert, and command features.
+- **Edge agent** — A lightweight Python agent that runs on a Raspberry Pi (including Pi Zero), reads MAVLink from a Pixhawk, and bridges everything to the cloud over MQTT.
 
-- **Dashboard** talks to **API** over HTTP/WebSocket.
-- **API** talks to **datastores** (Postgres, MongoDB, Redis).
-- **Edge Agent** connects to a Pixhawk via **MAVLink** and publishes telemetry to **MQTT (EMQX)**.
-- **API** and **Dashboard** subscribe/stream telemetry and send commands via MQTT topics defined in `backend.shared.mqtt_topics.MQTTTopics`.
+---
 
-## Local development (Docker Compose)
+## Architecture
 
-Prereqs: Docker Desktop.
+```
+                                    ┌──────────────┐
+                                    │  Dashboard   │  React / Vite
+                                    │  (Web UI)    │  Real-time charts, map, controls
+                                    └──────┬───────┘
+                                           │ HTTP + WebSocket
+                                           ▼
+┌──────────┐    MAVLink     ┌───────────┐  MQTT   ┌──────────────────┐    SQL/NoSQL    ┌──────────────────┐
+│ Pixhawk  │──── UART ─────▶│  Pi Zero  │────────▶│  Backend API     │───────────────▶│  Postgres        │
+│ (FC)     │   /dev/serial0 │  (Edge    │  EMQX   │  (FastAPI)       │               │  MongoDB         │
+│          │                │   Agent)  │◀────────│                  │               │  Redis           │
+└──────────┘                └───────────┘ cmds    └──────────────────┘               └──────────────────┘
+                                                           │ WebSocket
+                                                           ▼
+                                                   ┌──────────────┐
+                                                   │  Mobile App  │  Flutter (Android/iOS)
+                                                   └──────────────┘
+```
 
-Start everything:
+**Data flow:** Pixhawk sensors → MAVLink (serial) → Raspberry Pi edge agent → MQTT (EMQX broker) → Backend API → WebSocket → Dashboard / Mobile App
+
+---
+
+## Tech stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Backend API** | Python, FastAPI, SQLAlchemy (async), Pydantic |
+| **Databases** | PostgreSQL (relational), MongoDB (time-series telemetry), Redis (cache + pub/sub) |
+| **Message broker** | EMQX (MQTT) |
+| **Web dashboard** | React 18, Vite, Tailwind CSS, Zustand, Recharts, Leaflet |
+| **Mobile app** | Flutter / Dart (Android & iOS) |
+| **Edge agent** | Python, pymavlink, aiomqtt |
+| **Infrastructure** | Docker Compose, Kubernetes, Helm, GitHub Actions CI/CD |
+
+---
+
+## Repository structure
+
+```
+backend/           FastAPI API gateway + service modules (auth, fleet, mission, telemetry, alert, command)
+dashboard/         React/Vite web UI
+mobile/            Flutter mobile app (Android & iOS)
+edge-agent/        Raspberry Pi edge agent (Pixhawk MAVLink ↔ MQTT)
+shared_python/     Shared Python library (schemas, MQTT topics, config)
+testMQTT/          Drone & robot simulators for local testing without hardware
+infra/             Kubernetes manifests, Helm chart, EMQX config
+scripts/           PowerShell helper scripts for dev
+```
+
+---
+
+## Features by module
+
+### Backend API (`backend/`)
+
+| Module | Endpoints | Description |
+|--------|-----------|-------------|
+| **Auth** | `/api/v1/auth/*` | JWT login/logout/refresh, user CRUD, organization CRUD, role-based access (Super Admin, Admin, Operator, Pilot, Viewer), password recovery |
+| **Fleet** | `/api/v1/fleet/*` | Vehicle CRUD, fleet groups, fleet-user assignments, vehicle status tracking |
+| **Telemetry** | `/api/v1/telemetry/*` | Latest snapshot (Redis), historical queries (MongoDB), real-time WebSocket streaming |
+| **Missions** | `/api/v1/missions/*` | Mission CRUD, waypoint graph builder, assign/unassign vehicles, upload to vehicle, status tracking |
+| **Commands** | `/api/v1/commands/*` | Dispatch commands to vehicles via MQTT (arm, disarm, takeoff, land, RTL, etc.), command history |
+| **Alerts** | `/api/v1/alerts/*` | Rule engine, alert CRUD, acknowledge/resolve, real-time push via WebSocket |
+
+### Web Dashboard (`dashboard/`)
+
+- **Dashboard** — Overview with fleet stats, active alerts, recent missions
+- **Fleet** — Vehicle list, detail pages with live telemetry cards
+- **Live Map** — Real-time vehicle positions on an interactive Leaflet map
+- **Telemetry** — Per-vehicle telemetry charts (altitude, speed, battery, etc.) with time range selection and full-screen mode
+- **Mission Planner** — Visual waypoint editor on map, mission assignment and execution controls
+- **Control Panel** — Direct command interface for pilots (arm, takeoff, land, RTL, emergency stop)
+- **Alerts** — Live alert feed with severity filtering, acknowledgement, and resolution
+- **Analytics** — Historical charts and statistics
+- **User Management** — Admin panel for creating/editing users and organizations
+- **Settings** — Notification preferences, telemetry display settings, theme toggle
+
+### Mobile App (`mobile/`)
+
+- Same core features: Dashboard, Fleet, Telemetry, Alerts, Missions
+- Real-time WebSocket telemetry streaming
+- Dark/light theme
+- Demo mode for offline testing
+- Profile management
+
+### Edge Agent (`edge-agent/`)
+
+- Reads MAVLink messages from Pixhawk (HEARTBEAT, ATTITUDE, GPS_RAW_INT, GLOBAL_POSITION_INT, SYS_STATUS, BATTERY_STATUS)
+- Converts to structured `TelemetryFrame` JSON
+- Publishes to MQTT at configurable rate
+- Receives commands from MQTT and sends ACKs
+- Runs as a systemd service on Raspberry Pi
+
+### Simulators (`testMQTT/`)
+
+- `drone_simulator.py` — Simulates a drone with realistic flight physics, GPS movement, battery drain, and link loss
+- `robot_simulator.py` — Simulates a ground robot with patrol patterns
+- Both support **AeroCommand mode** to publish directly to the backend's MQTT topics (no hardware needed)
+
+---
+
+## Quick start
+
+### Option A: Docker (recommended)
+
+**Prerequisites:** Docker Desktop
 
 ```bash
 docker compose up -d --build
 ```
 
-Or use the helper script (Windows):
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+| EMQX Dashboard | http://localhost:18083 |
 
-```powershell
-./scripts/start-dev.ps1
-```
+**Default login:**
+- Email: `owner@makerskills.com`
+- Password: `makerskills_owner_change_me`
 
-Default local endpoints:
+### Option B: Without Docker
 
-- Dashboard: `http://localhost:3000`
-- API: `http://localhost:8000` (health: `/health/live`, `/health/ready`)
-- EMQX dashboard: `http://localhost:18083` (default user `admin`)
-- Postgres: `localhost:5432`
-- Mongo: `localhost:27017`
-- Redis: `localhost:6379`
+**Prerequisites:** Python 3.11+, Node 20+, PostgreSQL, MongoDB, Redis, and EMQX running locally
 
-Stop:
-
-```bash
-docker compose down
-```
-
-Or use the helper script (Windows):
-
-```powershell
-./scripts/stop-dev.ps1
-```
-
-Restart:
-
-```powershell
-./scripts/restart-dev.ps1
-```
-
-## Local development (no Docker)
-
-### Backend
-
-Prereqs: Python 3.11.
+**Backend:**
 
 ```bash
 cd backend
@@ -72,14 +155,10 @@ pip install -U pip
 pip install fastapi[standard] uvicorn[standard] sqlalchemy[asyncio] asyncpg alembic \
   pydantic pydantic-settings python-jose[cryptography] passlib[bcrypt] motor redis[hiredis] \
   aiomqtt httpx python-multipart orjson
-
-# run
 uvicorn backend.services.gateway.main:app --reload --port 8000
 ```
 
-### Dashboard
-
-Prereqs: Node 20.
+**Dashboard:**
 
 ```bash
 cd dashboard
@@ -87,64 +166,64 @@ npm ci
 npm run dev
 ```
 
-## Shared Python library
+Dashboard will be at http://localhost:5173.
 
-The shared library lives in `shared_python/` and is installable as `aerocommand-shared`.
-It publishes modules under `backend.shared.*` so the backend and edge agent can share the same schemas/topics.
+### Helper scripts (Windows)
 
-Install (dev):
-
-```bash
-pip install -e ./shared_python
+```powershell
+./scripts/start-dev.ps1     # Start Docker stack
+./scripts/stop-dev.ps1      # Stop Docker stack
+./scripts/restart-dev.ps1   # Restart Docker stack
 ```
 
-## Edge agent (Raspberry Pi)
+---
 
-The edge agent is in `edge-agent/`.
+## Connecting a real drone
 
-Install (dev from repo root):
+See `PI_ZERO_SETUP_GUIDE.txt` in the repo root for a complete step-by-step guide covering hardware wiring, Pixhawk configuration, Pi Zero setup, and edge agent deployment.
+
+**Summary:**
+
+1. Configure Pixhawk TELEM2 for MAVLink2 at 57600 baud (via Mission Planner)
+2. Wire Pixhawk TELEM2 TX/RX/GND to Raspberry Pi GPIO
+3. Install the edge agent on the Pi (`pip install -e ./shared_python && pip install -e ./edge-agent`)
+4. Create a vehicle in the dashboard, copy the Vehicle ID and Org ID
+5. Configure the edge agent with those IDs and your MQTT broker address
+6. Start the edge agent — telemetry flows automatically to the dashboard
+
+**Test without hardware** using the drone simulator:
 
 ```bash
-pip install -e ./shared_python
-pip install -e ./edge-agent
+set AEROCOMMAND_ENABLED=true
+set AEROCOMMAND_ORG_ID=<your org UUID>
+set AEROCOMMAND_VEHICLE_ID=<your vehicle UUID>
+python testMQTT/drone_simulator.py
 ```
 
-Run:
+---
+
+## MQTT topics
+
+| Topic | Direction | Description |
+|-------|-----------|-------------|
+| `aerocommand/{org}/telemetry/{vehicle}/raw` | Edge → Cloud | Telemetry frames |
+| `aerocommand/{org}/telemetry/{vehicle}/heartbeat` | Edge → Cloud | Heartbeat pings |
+| `aerocommand/{org}/command/{vehicle}/request` | Cloud → Edge | Command dispatch |
+| `aerocommand/{org}/command/{vehicle}/ack` | Edge → Cloud | Command acknowledgement |
+
+---
+
+## Deployment
+
+### Production Docker Compose
 
 ```bash
-# Example (adjust for your setup)
-export ORG_ID="demo"
-export VEHICLE_ID="vehicle-01"
-export MAVLINK_CONNECTION="/dev/ttyAMA0"   # or udp:127.0.0.1:14550
-export MAVLINK_BAUD="57600"
-export MQTT_HOST="localhost"
-export MQTT_PORT="1883"
-
-# start
-aerocommand-edge-agent
-```
-
-MQTT topics:
-
-- Telemetry publish: `aerocommand/{org}/telemetry/{vehicle}/raw`
-- Heartbeat publish: `aerocommand/{org}/telemetry/{vehicle}/heartbeat`
-- Commands subscribe: `aerocommand/{org}/command/{vehicle}/request`
-- Command ACK publish: `aerocommand/{org}/command/{vehicle}/ack`
-
-## Production Docker Compose
-
-Production Compose file: `docker-compose.prod.yml`.
-
-```bash
-# set required env vars (POSTGRES_*, MONGO_*, REDIS_PASSWORD, JWT_SECRET_KEY, etc.)
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-## Kubernetes
+### Kubernetes
 
-### Raw manifests
-
-Manifests are in `infra/k8s/`:
+**Raw manifests** (in `infra/k8s/`):
 
 ```bash
 kubectl apply -f infra/k8s/namespace.yaml
@@ -157,9 +236,7 @@ kubectl apply -f infra/k8s/dashboard.yaml
 kubectl apply -f infra/k8s/ingress.yaml
 ```
 
-### Helm
-
-Chart: `infra/helm/aerocommand/`.
+**Helm** (chart in `infra/helm/aerocommand/`):
 
 ```bash
 helm upgrade --install aerocommand ./infra/helm/aerocommand \
@@ -167,149 +244,32 @@ helm upgrade --install aerocommand ./infra/helm/aerocommand \
   --values ./infra/helm/aerocommand/values.yaml
 ```
 
-## CI/CD (GitHub Actions)
+### CI/CD (GitHub Actions)
 
-Workflows:
+- `.github/workflows/ci.yml` — Lint, test, build, push Docker images to GHCR
+- `.github/workflows/cd.yml` — Deploy to staging/production via Helm
 
-- `.github/workflows/ci.yml` – lint/test/build + build/push Docker images to GHCR
-- `.github/workflows/cd.yml` – deploy (staging via `kubectl set image`, prod via Helm)
+---
 
-Recommended setup:
+## Security model
 
-- Use GitHub **Environments**: `staging`, `production`
-- Store kubeconfigs as secrets:
-  - `KUBE_CONFIG_STAGING` (base64 kubeconfig)
-  - `KUBE_CONFIG_PROD` (base64 kubeconfig)
-- Store environment URLs as variables:
-  - `STAGING_API_URL`
-  - `PROD_API_URL`
+- Public registration is disabled
+- A single owner account is seeded on first startup (configurable via environment variables)
+- Owner creates organizations and admin users
+- Role-based access: **Super Admin** > **Admin** > **Operator** > **Pilot** > **Viewer**
+- JWT-based authentication with access + refresh tokens
+- Rate limiting and CORS middleware
 
-## Secrets management
+**Default dev owner credentials:**
 
-- Local dev: values in `docker-compose.yml` are dev-only.
-- Kubernetes: `infra/k8s/secrets.yaml` contains placeholder base64 values.
-  Use one of:
-  - External Secrets Operator
-  - Sealed Secrets
-  - Your cloud secret manager + CSI driver
+| Setting | Default | Env var |
+|---------|---------|---------|
+| Email | `owner@makerskills.com` | `OWNER_EMAIL` |
+| Password | `makerskills_owner_change_me` | `OWNER_PASSWORD` |
+| Name | `MakerSkills Owner` | `OWNER_NAME` |
 
-  ## Beginner setup (first time)
+---
 
-  This section is a step-by-step guide to get the platform running and create your first account.
+## License
 
-  ### Option A: Docker (recommended)
-
-  1) Prereqs
-    - Install Docker Desktop.
-
-  2) Start the stack
-
-  ```bash
-  docker compose up -d --build
-  ```
-
-  3) Open the dashboard
-    - http://localhost:3000
-
-  4) First account (dev auto-seed)
-    - Email: owner@makerskills.com
-    - Password: makerskills_owner_change_me
-
-  5) Verify the API is healthy
-    - http://localhost:8000/health/live
-    - http://localhost:8000/health/ready
-
-  6) Optional: turn Mock Mode off
-    - Open the user menu in the top-right of the dashboard.
-    - Toggle Mock Mode OFF to use the real backend.
-
-  ### Option B: Local (no Docker)
-
-  1) Prereqs
-    - Python 3.11
-    - Node 20
-    - Postgres, MongoDB, Redis, and EMQX running locally
-
-  2) Backend
-
-  ```bash
-  cd backend
-  pip install -U pip
-  pip install fastapi[standard] uvicorn[standard] sqlalchemy[asyncio] asyncpg alembic \
-    pydantic pydantic-settings python-jose[cryptography] passlib[bcrypt] motor redis[hiredis] \
-    aiomqtt httpx python-multipart orjson
-
-  uvicorn backend.services.gateway.main:app --reload --port 8000
-  ```
-
-  3) Dashboard
-
-  ```bash
-  cd dashboard
-  npm ci
-  npm run dev
-  ```
-
-  4) Open the dashboard
-    - http://localhost:5173
-
-  5) First account (dev auto-seed)
-    - Email: owner@makerskills.com
-    - Password: makerskills_owner_change_me
-
-  ### Change the default dev owner (optional)
-
-  Set these environment variables for the API service:
-
-  - OWNER_EMAIL
-  - OWNER_PASSWORD
-  - OWNER_NAME
-  - OWNER_CREATE_ORG
-  - OWNER_ORG_NAME
-  - OWNER_ORG_SLUG
-
-  For Docker, add them under the api-server environment section in docker-compose.yml.
-
-  ### Common issues
-
-  - Login fails with 401:
-    - Ensure the dev owner exists (restart the API after setting env vars).
-    - Make sure Mock Mode is OFF when you want real backend mode.
-
-  - Dashboard shows Network Error:
-    - Check that the API is running at http://localhost:8000.
-    - Check CORS origins in docker-compose.yml include http://localhost:3000 or http://localhost:5173.
-    - Verify the login request succeeds and a token is stored.
-
-  ## Security-first onboarding model
-
-  This project now follows an owner-first onboarding flow:
-
-  - Public registration is disabled.
-  - A single owner account is seeded at startup (env-driven).
-  - Owner creates the first organization.
-  - Owner/Admin creates all other users.
-
-  ### Default owner (dev)
-
-  - Email: `owner@makerskills.com`
-  - Password: `makerskills_owner_change_me`
-
-  Change these via `docker-compose.yml` under `api-server.environment`:
-
-  - `OWNER_EMAIL`
-  - `OWNER_PASSWORD`
-  - `OWNER_NAME`
-  - `OWNER_CREATE_ORG`
-  - `OWNER_ORG_NAME`
-  - `OWNER_ORG_SLUG`
-
-  ### Onboarding flow
-
-  1) Login as owner.
-  2) Create first organization:
-    - `POST /api/v1/auth/organizations`
-    - Body: `{ "name": "AeroCommand HQ", "slug": "aerocommand" }`
-  3) Create admins/operators:
-    - `POST /api/v1/auth/users`
-  4) Users login and operate normally.
+This project was built as a university/group project (PI Group).

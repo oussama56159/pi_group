@@ -162,20 +162,64 @@ class TelemetryLineChartCard extends StatelessWidget {
     final yMax = yValues.isEmpty ? 1.0 : yValues.reduce(max);
     final pad = (yMax - yMin).abs() * 0.15;
 
+    final xMin = series.isEmpty ? 0.0 : series.first.x;
+    final xMax = series.isEmpty ? 1.0 : series.last.x;
+    final xInterval = _niceTimeInterval(xMin, xMax);
+    final yInterval = _niceInterval(yMin, yMax);
+    final ySpan = (yMax - yMin).abs();
+
     final chart = SizedBox(
       height: height,
       child: LineChart(
         LineChartData(
-          minX: series.isEmpty ? 0 : series.first.x,
-          maxX: series.isEmpty ? 1 : series.last.x,
+          minX: xMin,
+          maxX: xMax,
           minY: yMin - (pad == 0 ? 1 : pad),
           maxY: yMax + (pad == 0 ? 1 : pad),
-          gridData: FlGridData(show: true, drawVerticalLine: false, horizontalInterval: _niceInterval(yMin, yMax)),
+          gridData: FlGridData(show: true, drawVerticalLine: false, horizontalInterval: yInterval),
           titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 44,
+                interval: yInterval,
+                getTitlesWidget: (v, meta) {
+                  final label = _formatYAxisValue(v, unit: unit, span: ySpan);
+                  return SideTitleWidget(
+                    axisSide: meta.axisSide,
+                    space: 6,
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                },
+              ),
+            ),
             topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 26,
+                interval: xInterval,
+                getTitlesWidget: (v, meta) {
+                  final label = _formatElapsedTime(v);
+                  return SideTitleWidget(
+                    axisSide: meta.axisSide,
+                    space: 8,
+                    child: Text(
+                      label,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
           borderData: FlBorderData(show: false),
           lineTouchData: LineTouchData(
@@ -251,6 +295,42 @@ class TelemetryLineChartCard extends StatelessWidget {
     if (span < 20) return 5;
     if (span < 50) return 10;
     return 20;
+  }
+
+  double _niceTimeInterval(double minX, double maxX) {
+    final span = (maxX - minX).abs();
+    if (span <= 0) return 1;
+    if (span <= 60) return 10; // seconds
+    if (span <= 5 * 60) return 60; // 1 minute
+    if (span <= 15 * 60) return 3 * 60; // 3 minutes
+    if (span <= 60 * 60) return 10 * 60; // 10 minutes
+    return 15 * 60; // 15 minutes
+  }
+
+  String _formatElapsedTime(double seconds) {
+    final s = seconds.round().clamp(0, 1 << 31);
+    if (s >= 3600) {
+      final h = s ~/ 3600;
+      final m = (s % 3600) ~/ 60;
+      return '$h:${m.toString().padLeft(2, '0')}';
+    }
+    final m = s ~/ 60;
+    final ss = s % 60;
+    return '$m:${ss.toString().padLeft(2, '0')}';
+  }
+
+  String _formatYAxisValue(double v, {required String unit, required double span}) {
+    final lowerUnit = unit.toLowerCase();
+    final isPercentLike = lowerUnit.contains('%');
+
+    if (isPercentLike) {
+      if (span < 2) return v.toStringAsFixed(1);
+      return v.toStringAsFixed(0);
+    }
+
+    if (span >= 100) return v.toStringAsFixed(0);
+    if (span >= 10) return v.toStringAsFixed(1);
+    return v.toStringAsFixed(2);
   }
 }
 

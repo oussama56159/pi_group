@@ -1,15 +1,41 @@
-import { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { useMemo, useState } from 'react';
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area, LabelList } from 'recharts';
 import Card, { CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
-import Badge from '@/components/ui/Badge';
 import StatusIndicator from '@/components/ui/StatusIndicator';
 import { useFleetStore } from '@/stores/fleetStore';
 import { useTelemetryStore } from '@/stores/telemetryStore';
-import { Radio, Activity } from 'lucide-react';
+import { Activity } from 'lucide-react';
 
-const chartTheme = { stroke: '#334155', text: '#64748b', grid: '#1e293b' };
+const chartTheme = {
+  stroke: 'var(--color-border)',
+  text: 'var(--color-text-muted)',
+  grid: 'var(--color-border)',
+  tooltipBg: 'var(--color-bg-secondary)',
+  tooltipText: 'var(--color-text-primary)',
+  tooltipBorder: 'var(--color-border)',
+  labelFill: 'var(--color-text-secondary)',
+  labelFillStrong: 'var(--color-text-primary)',
+  labelOutline: 'var(--color-bg-primary)',
+};
 
-function TelemetryChart({ title, data, dataKey, color = '#3b82f6', unit = '' }) {
+function _formatNumber(val, precision) {
+  const n = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(n)) return '—';
+  const p = Number.isFinite(precision) ? Math.max(0, Math.min(precision, 6)) : 2;
+  return n.toFixed(p);
+}
+
+function TelemetryChart({ title, data, dataKey, color = '#3b82f6', unit = '', precision = 2 }) {
+  const lastIndex = data.length - 1;
+
+  const labelEvery = useMemo(() => {
+    const n = data.length;
+    if (n <= 12) return 1;
+    if (n <= 24) return 2;
+    if (n <= 48) return 4;
+    return 6;
+  }, [data.length]);
+
   return (
     <Card>
       <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
@@ -25,9 +51,58 @@ function TelemetryChart({ title, data, dataKey, color = '#3b82f6', unit = '' }) 
             <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
             <XAxis dataKey="time" tick={{ fill: chartTheme.text, fontSize: 10 }} axisLine={{ stroke: chartTheme.stroke }} />
             <YAxis tick={{ fill: chartTheme.text, fontSize: 10 }} axisLine={{ stroke: chartTheme.stroke }} />
-            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#f1f5f9' }}
-              formatter={(val) => [`${val.toFixed(2)} ${unit}`, title]} />
-            <Area type="monotone" dataKey={dataKey} stroke={color} fill={`url(#grad-${dataKey})`} strokeWidth={2} dot={false} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: chartTheme.tooltipBg,
+                border: `1px solid ${chartTheme.tooltipBorder}`,
+                borderRadius: 8,
+                color: chartTheme.tooltipText,
+              }}
+              formatter={(val) => [`${_formatNumber(val, precision)} ${unit}`, title]}
+            />
+            <Area
+              type="monotone"
+              dataKey={dataKey}
+              stroke={color}
+              fill={`url(#grad-${dataKey})`}
+              strokeWidth={2}
+              dot={false}
+              isAnimationActive
+              animationDuration={220}
+            >
+              <LabelList
+                dataKey={dataKey}
+                content={(props) => {
+                  const idx = props.index;
+                  if (typeof idx !== 'number') return null;
+                  if (data.length === 0) return null;
+
+                  const isLast = idx === lastIndex;
+                  const shouldShow = isLast || idx % labelEvery === 0;
+                  if (!shouldShow) return null;
+
+                  const label = `${_formatNumber(props.value, precision)}${unit ? ` ${unit}` : ''}`;
+                  const dy = isLast ? -10 : (idx / labelEvery) % 2 === 0 ? -10 : 16;
+
+                  return (
+                    <text
+                      x={props.x}
+                      y={props.y}
+                      dy={dy}
+                      textAnchor="middle"
+                      fontSize={isLast ? 11 : 10}
+                      fontWeight={isLast ? 700 : 600}
+                      fill={isLast ? chartTheme.labelFillStrong : chartTheme.labelFill}
+                      stroke={chartTheme.labelOutline}
+                      strokeWidth={3}
+                      paintOrder="stroke"
+                    >
+                      {label}
+                    </text>
+                  );
+                }}
+              />
+            </Area>
           </AreaChart>
         </ResponsiveContainer>
       </CardContent>
@@ -43,17 +118,33 @@ export default function TelemetryPage() {
 
   const t = allTelemetry[selectedId];
   const history = t?.history || [];
-  const chartData = history.slice(-60).map((h, i) => ({
-    time: i,
-    altitude: h.altitude ?? 0,
-    speed: h.groundspeed ?? 0,
-    battery: h.battery ?? 0,
-    heading: h.heading ?? 0,
-    roll: h.roll ?? 0,
-    pitch: h.pitch ?? 0,
-    throttle: h.throttle ?? 0,
-    climb: h.climb_rate ?? 0,
-  }));
+  const chartData = useMemo(() => {
+    const recent = history.slice(-60);
+    return recent.map((h, i) => {
+      const voltage = h.voltage ?? 0;
+      const current = h.current ?? 0;
+      return {
+        time: i,
+        ts: h.timestamp ?? Date.now(),
+        altitude: h.altitude ?? 0,
+        speed: h.groundspeed ?? 0,
+        battery: h.battery ?? 0,
+        heading: h.heading ?? 0,
+        roll: h.roll ?? 0,
+        pitch: h.pitch ?? 0,
+        throttle: h.throttle ?? 0,
+        climb: h.climb_rate ?? 0,
+        power_w: voltage * current,
+      };
+    });
+  }, [history]);
+
+  const powerPerHourData = useMemo(() => {
+    // Interpret "power per hour consumption" as instantaneous power (W), derived from voltage*current.
+    // (W = Wh/h).
+    // We keep this as its own dataset so we can later swap to a true energy-rate metric if needed.
+    return chartData;
+  }, [chartData]);
 
   return (
     <div className="space-y-6">
@@ -109,12 +200,12 @@ export default function TelemetryPage() {
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <TelemetryChart title="Altitude" data={chartData} dataKey="altitude" color="#3b82f6" unit="m" />
-        <TelemetryChart title="Ground Speed" data={chartData} dataKey="speed" color="#06b6d4" unit="m/s" />
-        <TelemetryChart title="Battery" data={chartData} dataKey="battery" color="#22c55e" unit="%" />
-        <TelemetryChart title="Heading" data={chartData} dataKey="heading" color="#f59e0b" unit="°" />
-        <TelemetryChart title="Throttle" data={chartData} dataKey="throttle" color="#8b5cf6" unit="%" />
-        <TelemetryChart title="Climb Rate" data={chartData} dataKey="climb" color="#22c55e" unit="m/s" />
+        <TelemetryChart title="Altitude" data={chartData} dataKey="altitude" color="#3b82f6" unit="m" precision={1} />
+        <TelemetryChart title="Ground Speed" data={chartData} dataKey="speed" color="#06b6d4" unit="m/s" precision={1} />
+        <TelemetryChart title="Battery" data={chartData} dataKey="battery" color="#22c55e" unit="%" precision={0} />
+        <TelemetryChart title="Power / Hour Consumption" data={powerPerHourData} dataKey="power_w" color="#ef4444" unit="W" precision={0} />
+        <TelemetryChart title="Heading" data={chartData} dataKey="heading" color="#f59e0b" unit="°" precision={0} />
+        <TelemetryChart title="Climb Rate" data={chartData} dataKey="climb" color="#22c55e" unit="m/s" precision={1} />
       </div>
     </div>
   );

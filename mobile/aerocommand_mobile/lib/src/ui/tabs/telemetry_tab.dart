@@ -372,19 +372,20 @@ class _TelemetryTabState extends State<TelemetryTab> {
           ),
           const SizedBox(height: 12),
           TelemetryLineChartCard(
-            title: 'Battery',
-            unit: TelemetryMetric.battery.unit,
-            series: buildSeries(history, (s) => s.batteryRemaining),
-            onTap: selected == null
+            title: 'Power per hour consumption',
+            unit: '%/h',
+            series: _buildBatteryConsumptionPerHourSeries(history),
+            onTap: history.length < 2
                 ? null
                 : () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => TelemetryMetricDetailScreen(
-                          vehicleId: selected,
-                          vehicleName: _vehicles.firstWhere((v) => v.id == selected).name,
-                          metric: TelemetryMetric.battery,
-                          initialRange: _range,
+                      FullscreenChartScreen.route(
+                        title: 'Power per hour consumption',
+                        chart: TelemetryLineChartCard(
+                          title: 'Power per hour consumption',
+                          unit: '%/h',
+                          series: _buildBatteryConsumptionPerHourSeries(history),
+                          height: 320,
                         ),
                       ),
                     );
@@ -464,6 +465,35 @@ class _TelemetryTabState extends State<TelemetryTab> {
 
   double _battery01(TelemetrySummary t) {
     return _batteryPct(t) / 100.0;
+  }
+
+  List<TelemetryPoint> _buildBatteryConsumptionPerHourSeries(List<TelemetrySummary> samples) {
+    if (samples.length < 2) return const [];
+
+    final x0 = samples.first.timestamp.millisecondsSinceEpoch.toDouble();
+    final out = <TelemetryPoint>[];
+
+    for (var i = 1; i < samples.length; i++) {
+      final prev = samples[i - 1];
+      final cur = samples[i];
+      final dtMs = cur.timestamp.millisecondsSinceEpoch - prev.timestamp.millisecondsSinceEpoch;
+      if (dtMs <= 0) continue;
+
+      final prevPct = _batteryPct(prev).toDouble();
+      final curPct = _batteryPct(cur).toDouble();
+
+      final ratePerHour = (prevPct - curPct) / (dtMs / 3600000.0);
+      final consumptionPerHour = ratePerHour < 0 ? 0.0 : ratePerHour;
+
+      out.add(
+        TelemetryPoint(
+          (cur.timestamp.millisecondsSinceEpoch.toDouble() - x0) / 1000.0,
+          consumptionPerHour,
+        ),
+      );
+    }
+
+    return out;
   }
 
   Widget _sectionHeader(BuildContext context, String title) {

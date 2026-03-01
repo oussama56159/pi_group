@@ -1,12 +1,15 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../../models/vehicle_model.dart';
 import '../../realtime/realtime_controller.dart';
 import '../screens/drone_details_screen.dart';
-import '../widgets/drone_logo.dart';
+import '../widgets/drone_map_marker.dart';
+import '../widgets/drone_map_styles.dart';
 
 class FleetMapFullscreenScreen extends StatefulWidget {
   const FleetMapFullscreenScreen({
@@ -33,6 +36,9 @@ class _FleetMapFullscreenScreenState extends State<FleetMapFullscreenScreen> {
   int _lastMarkerCount = -1;
   bool _userInteracted = false;
 
+  String? _selectedVehicleId;
+  bool _legendCollapsed = false;
+
   @override
   void initState() {
     super.initState();
@@ -45,14 +51,17 @@ class _FleetMapFullscreenScreenState extends State<FleetMapFullscreenScreen> {
       final t = realtime.latestTelemetry[v.id];
       if (t == null) continue;
       if (t.lat == 0 || t.lng == 0) continue;
+
+      final state = DroneMapStyle.stateFrom(status: v.status, armed: t.armed);
       markers.add(
         _VehicleMarker(
           vehicleId: v.id,
           name: v.name,
-          status: v.status,
-          armed: t.armed,
+          state: state,
           headingDeg: t.heading,
           point: LatLng(t.lat, t.lng),
+          altMeters: t.alt,
+          speedMps: t.groundspeed,
         ),
       );
     }
@@ -115,6 +124,7 @@ class _FleetMapFullscreenScreenState extends State<FleetMapFullscreenScreen> {
                   _userInteracted = true;
                 }
               },
+              onTap: (_, __) => setState(() => _selectedVehicleId = null),
             ),
             children: [
               TileLayer(
@@ -122,31 +132,66 @@ class _FleetMapFullscreenScreenState extends State<FleetMapFullscreenScreen> {
                 subdomains: widget.tileSubdomains,
                 userAgentPackageName: 'aerocommand_mobile',
               ),
-              MarkerLayer(
-                markers: [
-                  for (final m in markers)
-                    Marker(
-                      point: m.point,
-                      width: 40,
-                      height: 40,
-                      child: GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => DroneDetailsScreen(vehicleId: m.vehicleId, initialName: m.name),
-                            ),
-                          );
-                        },
-                        child: Transform.rotate(
-                          angle: (m.headingDeg) * 3.141592653589793 / 180.0,
-                          child: DroneLogo(
-                            size: 34,
-                            color: _statusColor(scheme, m.status, m.armed),
+              MarkerClusterLayerWidget(
+                options: MarkerClusterLayerOptions(
+                  markers: [
+                    for (final m in markers)
+                      Marker(
+                        key: ValueKey('map-marker-${m.vehicleId}'),
+                        point: m.point,
+                        width: _selectedVehicleId == m.vehicleId ? 220 : 48,
+                        height: 48,
+                        child: DroneMapMarker(
+                          key: ValueKey('drone-marker-${m.vehicleId}'),
+                          vm: DroneMarkerViewModel(
+                            vehicleId: m.vehicleId,
+                            name: m.name,
+                            state: m.state,
+                            headingDeg: m.headingDeg,
+                            altMeters: m.altMeters,
+                            speedMps: m.speedMps,
                           ),
+                          selected: _selectedVehicleId == m.vehicleId,
+                          showLabel: _selectedVehicleId == m.vehicleId,
+                          onTap: () {
+                            if (_selectedVehicleId != m.vehicleId) {
+                              setState(() => _selectedVehicleId = m.vehicleId);
+                              return;
+                            }
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => DroneDetailsScreen(vehicleId: m.vehicleId, initialName: m.name),
+                              ),
+                            );
+                          },
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                  maxClusterRadius: 44,
+                  size: const Size(46, 46),
+                  builder: (context, clusterMarkers) {
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: scheme.surface.withValues(alpha: 0.92),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.65)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Theme.of(context).shadowColor.withValues(alpha: 0.35),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          clusterMarkers.length.toString(),
+                          style: Theme.of(context).textTheme.labelLarge,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
               if (markers.isNotEmpty)
                 RichAttributionWidget(
@@ -175,16 +220,18 @@ class _FleetMapFullscreenScreenState extends State<FleetMapFullscreenScreen> {
               ),
             ),
           ),
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: 12,
+            child: DroneStateLegend(
+              collapsed: _legendCollapsed,
+              onToggleCollapsed: () => setState(() => _legendCollapsed = !_legendCollapsed),
+            ),
+          ),
         ],
       ),
     );
-  }
-
-  Color _statusColor(ColorScheme scheme, String status, bool armed) {
-    if (armed) return scheme.error;
-    if (status == 'in_flight') return scheme.primary;
-    if (status == 'online') return scheme.tertiary;
-    return scheme.outline;
   }
 }
 
@@ -192,16 +239,18 @@ class _VehicleMarker {
   _VehicleMarker({
     required this.vehicleId,
     required this.name,
-    required this.status,
-    required this.armed,
+    required this.state,
     required this.headingDeg,
     required this.point,
+    required this.altMeters,
+    required this.speedMps,
   });
 
   final String vehicleId;
   final String name;
-  final String status;
-  final bool armed;
+  final DroneOperationalState state;
   final double headingDeg;
   final LatLng point;
+  final double altMeters;
+  final double speedMps;
 }
